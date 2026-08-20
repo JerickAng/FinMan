@@ -23,6 +23,7 @@
 </div>
 
 <form method="POST" action="{{ url_for('sme_data_entry') }}">
+    <input type="hidden" name="csrf_token" value="{{ csrf_token() }}"/>
 
   <!-- Period -->
   <div class="form-group" style="margin-bottom: 1.2rem;">

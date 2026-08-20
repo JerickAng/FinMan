@@ -34,6 +34,7 @@
 
       <!-- Hidden form — id_token filled by Firebase JS SDK then submitted -->
       <form id="loginForm" method="POST" action="{{ url_for('login') }}">
+        <input type="hidden" name="csrf_token" value="{{ csrf_token() }}"/>
         <input type="hidden" name="id_token" id="id_token"/>
 
         <div class="form-group">
@@ -70,14 +71,14 @@
   <script src="https://www.gstatic.com/firebasejs/9.22.2/firebase-auth-compat.js"></script>
 
   <script>
-    // ── Replace these values with your Firebase project config ──
+
     const firebaseConfig = {
-      apiKey:            "YOUR_API_KEY",
-      authDomain:        "YOUR_PROJECT.firebaseapp.com",
-      projectId:         "YOUR_PROJECT_ID",
-      storageBucket:     "YOUR_PROJECT.appspot.com",
-      messagingSenderId: "YOUR_SENDER_ID",
-      appId:             "YOUR_APP_ID",
+      apiKey:            "AIzaSyA5y3v9bWNxhy6ACc5aaionSV6LXpuo8JQ",
+      authDomain:        "finman-c0e9e.firebaseapp.com",
+      projectId:         "finman-c0e9e",
+      storageBucket:     "finman-c0e9e.firebasestorage.app",
+      messagingSenderId: "804833754877",
+      appId:             "1:804833754877:web:f20dfab0218bd0f14fc894",
     };
     firebase.initializeApp(firebaseConfig);
     const auth = firebase.auth();

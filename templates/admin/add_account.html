@@ -1,0 +1,71 @@
+{% extends "base.html" %}
+{% block title %}Admin — Add Account{% endblock %}
+
+{% block sidebar %}
+  <a href="{{ url_for('admin_accounts') }}" class="nav-item">
+    <span class="nav-icon">👥</span> Accounts
+  </a>
+  <a href="{{ url_for('admin_analytics') }}" class="nav-item">
+    <span class="nav-icon">📊</span> Analytics
+  </a>
+{% endblock %}
+
+{% block content %}
+
+<div class="page-header">
+  <a href="{{ url_for('admin_accounts') }}" class="btn btn-outline" style="margin-right:1rem;">← Back</a>
+  <h2 class="page-title">Add New Account</h2>
+</div>
+
+<div class="form-card">
+  <form method="POST" action="{{ url_for('admin_add_account') }}">
+      <input type="hidden" name="csrf_token" value="{{ csrf_token() }}"/>
+
+
+    <div class="form-row-2">
+      <div class="form-group">
+        <label>Full Name</label>
+        <input type="text" name="name" class="form-input"
+               placeholder="e.g. Jerick Ang" required/>
+      </div>
+      <div class="form-group">
+        <label>Company Name</label>
+        <input type="text" name="company" class="form-input"
+               placeholder="e.g. ABC Sdn Bhd" required/>
+      </div>
+    </div>
+
+    <div class="form-group">
+      <label>Email Address</label>
+      <input type="email" name="email" class="form-input"
+             placeholder="user@company.com" required/>
+    </div>
+
+    <div class="form-group">
+      <label>Password</label>
+      <input type="password" name="password" class="form-input"
+             placeholder="Minimum 6 characters" required minlength="6"/>
+    </div>
+
+    <div class="form-group">
+      <label>Role</label>
+      <select name="role" class="form-input">
+        <option value="sme">SME (Client) — Basic financial entry & reports</option>
+        <option value="cfo">CFO (Audience) — Full dashboard, forecasting & reminders</option>
+      </select>
+    </div>
+
+    <div class="form-group">
+      <label>Registration Date</label>
+      <input type="date" name="registered" class="form-input"/>
+    </div>
+
+    <div class="form-actions" style="margin-top:1.5rem;">
+      <a href="{{ url_for('admin_accounts') }}" class="btn btn-outline">Cancel</a>
+      <button type="submit" class="btn btn-primary">Create Account</button>
+    </div>
+
+  </form>
+</div>
+
+{% endblock %}

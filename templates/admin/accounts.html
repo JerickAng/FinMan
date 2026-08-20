@@ -1,0 +1,106 @@
+{% extends "base.html" %}
+{% block title %}Admin — Accounts{% endblock %}
+
+{% block sidebar %}
+  <a href="{{ url_for('admin_accounts') }}"
+     class="nav-item {% if request.endpoint == 'admin_accounts' %}active{% endif %}">
+    <span class="nav-icon">👥</span> Accounts
+  </a>
+  <a href="{{ url_for('admin_analytics') }}"
+     class="nav-item {% if request.endpoint == 'admin_analytics' %}active{% endif %}">
+    <span class="nav-icon">📊</span> Analytics
+  </a>
+{% endblock %}
+
+{% block content %}
+
+<div class="page-header" style="justify-content: space-between;">
+  <h2 class="page-title">Account Management</h2>
+  <a href="{{ url_for('admin_add_account') }}" class="btn btn-primary">+ Add Account</a>
+</div>
+
+<!-- Stats row -->
+<div class="kpi-grid" style="grid-template-columns: repeat(3,1fr); margin-bottom:1.4rem;">
+  <div class="kpi-card">
+    <div class="kpi-label">Total SMEs</div>
+    <div class="kpi-value">{{ total }}</div>
+  </div>
+  <div class="kpi-card">
+    <div class="kpi-label">Active Now</div>
+    <div class="kpi-value text-green">{{ active }}</div>
+  </div>
+  <div class="kpi-card">
+    <div class="kpi-label">Suspended</div>
+    <div class="kpi-value text-red">{{ suspended }}</div>
+  </div>
+</div>
+
+<!-- Accounts table -->
+<div class="table-card">
+  <table>
+    <thead>
+      <tr>
+        <th>Company</th>
+        <th>Email</th>
+        <th>Role</th>
+        <th>Registered</th>
+        <th>Status</th>
+        <th>Actions</th>
+      </tr>
+    </thead>
+    <tbody>
+      {% if users %}
+        {% for u in users %}
+        <tr>
+          <td><strong>{{ u.company or '—' }}</strong></td>
+          <td>{{ u.email }}</td>
+          <td>
+            <span class="badge {% if u.role == 'cfo' %}badge-blue{% else %}badge-amber{% endif %}">
+              {{ u.role|upper }}
+            </span>
+          </td>
+          <td>{{ u.registered or '—' }}</td>
+          <td>
+            {% if u.status == 'active' %}
+              <span class="badge badge-green">Active</span>
+            {% elif u.status == 'suspended' %}
+              <span class="badge badge-red">Suspended</span>
+            {% else %}
+              <span class="badge">{{ u.status }}</span>
+            {% endif %}
+          </td>
+          <td>
+            <div style="display:flex; gap:10px; align-items:center;">
+              {% if u.status == 'active' %}
+                <form method="POST" action="{{ url_for('admin_suspend', uid=u.uid) }}"
+                      onsubmit="return confirm('Suspend {{ u.company }}?')" style="display:inline;">
+                  <input type="hidden" name="csrf_token" value="{{ csrf_token() }}"/>
+                  <button type="submit" class="action-link amber link-button">Suspend</button>
+                </form>
+              {% else %}
+                <form method="POST" action="{{ url_for('admin_restore', uid=u.uid) }}" style="display:inline;">
+                  <input type="hidden" name="csrf_token" value="{{ csrf_token() }}"/>
+                  <button type="submit" class="action-link green link-button">Restore</button>
+                </form>
+              {% endif %}
+              <form method="POST" action="{{ url_for('admin_delete', uid=u.uid) }}"
+                    onsubmit="return confirm('Permanently delete {{ u.company }}? This cannot be undone.')" style="display:inline;">
+                <input type="hidden" name="csrf_token" value="{{ csrf_token() }}"/>
+                <button type="submit" class="action-link red link-button">Delete</button>
+              </form>
+            </div>
+          </td>
+        </tr>
+        {% endfor %}
+      {% else %}
+        <tr>
+          <td colspan="6" style="text-align:center; color:var(--text-muted); padding:2rem;">
+            No accounts yet. Click <strong>+ Add Account</strong> to create one.
+          </td>
+        </tr>
+      {% endif %}
+    </tbody>
+  </table>
+</div>
+
+{% endblock %}

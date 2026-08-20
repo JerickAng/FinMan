@@ -1,0 +1,83 @@
+{% extends "base.html" %}
+{% block title %}Admin — Analytics{% endblock %}
+
+{% block sidebar %}
+  <a href="{{ url_for('admin_accounts') }}" class="nav-item">
+    <span class="nav-icon">👥</span> Accounts
+  </a>
+  <a href="{{ url_for('admin_analytics') }}"
+     class="nav-item {% if request.endpoint == 'admin_analytics' %}active{% endif %}">
+    <span class="nav-icon">📊</span> Analytics
+  </a>
+{% endblock %}
+
+{% block content %}
+
+<div class="page-header">
+  <h2 class="page-title">System Analytics</h2>
+</div>
+
+<div class="kpi-grid" style="grid-template-columns: repeat(3,1fr);">
+  <div class="kpi-card">
+    <div class="kpi-label">Total Registered SMEs</div>
+    <div class="kpi-value">{{ total }}</div>
+  </div>
+  <div class="kpi-card">
+    <div class="kpi-label">Active Accounts</div>
+    <div class="kpi-value text-green">{{ active }}</div>
+  </div>
+  <div class="kpi-card">
+    <div class="kpi-label">Suspended Accounts</div>
+    <div class="kpi-value text-red">{{ suspended }}</div>
+  </div>
+</div>
+
+<div class="chart-row" style="margin-top:1.4rem;">
+  <div class="chart-card">
+    <div class="chart-title">Account Status Distribution</div>
+    <canvas id="statusChart" height="160"></canvas>
+  </div>
+  <div class="chart-card">
+    <div class="chart-title">Role Distribution</div>
+    <canvas id="roleChart" height="160"></canvas>
+  </div>
+</div>
+
+{% endblock %}
+
+{% block scripts %}
+<script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.0/dist/chart.umd.min.js"></script>
+<script>
+  // Status chart
+  new Chart(document.getElementById("statusChart"), {
+    type: "doughnut",
+    data: {
+      labels: ["Active", "Suspended"],
+      datasets: [{
+        data: [{{ active }}, {{ suspended }}],
+        backgroundColor: ["#16A34A", "#DC2626"],
+        borderWidth: 0,
+      }]
+    },
+    options: {
+      plugins: { legend: { labels: { color: "#F1F5F9" } } }
+    }
+  });
+
+  // Role chart
+  new Chart(document.getElementById("roleChart"), {
+    type: "doughnut",
+    data: {
+      labels: ["SME", "CFO"],
+      datasets: [{
+        data: [{{ sme_count }}, {{ cfo_count }}],
+        backgroundColor: ["#D97706", "#2563EB"],
+        borderWidth: 0,
+      }]
+    },
+    options: {
+      plugins: { legend: { labels: { color: "#F1F5F9" } } }
+    }
+  });
+</script>
+{% endblock %}
