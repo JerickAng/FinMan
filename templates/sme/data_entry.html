@@ -1,0 +1,120 @@
+{% extends "base.html" %}
+{% block title %}Data Entry{% endblock %}
+
+{% block sidebar %}
+  <a href="{{ url_for('sme_dashboard') }}" class="nav-item">
+    <span class="nav-icon">▦</span> Dashboard
+  </a>
+  <a href="{{ url_for('sme_data_entry') }}"
+     class="nav-item {% if request.endpoint == 'sme_data_entry' %}active{% endif %}">
+    <span class="nav-icon">⊕</span> Data Entry
+  </a>
+  <a href="{{ url_for('sme_summary') }}" class="nav-item">
+    <span class="nav-icon">▣</span> Summary
+  </a>
+  <a href="{{ url_for('sme_report') }}" class="nav-item">
+    <span class="nav-icon">☰</span> Report
+  </a>
+{% endblock %}
+
+{% block content %}
+<div class="page-header">
+  <h2 class="page-title">Dashboard Overview — Data Entry</h2>
+</div>
+
+<form method="POST" action="{{ url_for('sme_data_entry') }}">
+
+  <!-- Period -->
+  <div class="form-group" style="margin-bottom: 1.2rem;">
+    <label>Reporting Period (YYYY-MM)</label>
+    <input type="text" name="period" class="form-input"
+           placeholder="e.g. 2026-06" style="max-width:200px;" required/>
+  </div>
+
+  <div class="entry-grid">
+
+    <!-- Income card -->
+    <div class="entry-card">
+      <div class="entry-card-header income-header">
+        <span>↗</span> Income
+      </div>
+      <div class="form-group">
+        <label>Source</label>
+        <input type="text" name="source" class="form-input" placeholder="e.g. Sales revenue"/>
+      </div>
+      <div class="form-group">
+        <label>Amount (RM)</label>
+        <input type="number" name="income" class="form-input"
+               step="0.01" min="0" placeholder="0.00" required/>
+      </div>
+      <div class="form-group">
+        <label>Category</label>
+        <select name="category" class="form-input">
+          <option value="Sales">Sales</option>
+          <option value="Service">Service</option>
+          <option value="Other">Other</option>
+        </select>
+      </div>
+    </div>
+
+    <!-- Expenses card -->
+    <div class="entry-card">
+      <div class="entry-card-header expense-header">
+        <span>↘</span> Expenses
+      </div>
+      <div class="form-group">
+        <label>Expense Name</label>
+        <input type="text" name="expense_name" class="form-input"
+               placeholder="e.g. Office rent"/>
+      </div>
+      <div class="form-group">
+        <label>Amount (RM)</label>
+        <input type="number" name="expenses" class="form-input"
+               step="0.01" min="0" placeholder="0.00" required/>
+      </div>
+      <div class="form-group">
+        <label>Category</label>
+        <select name="expense_category" class="form-input">
+          <option value="Rent">Rent</option>
+          <option value="Payroll">Payroll</option>
+          <option value="Utilities">Utilities</option>
+          <option value="Other">Other</option>
+        </select>
+      </div>
+    </div>
+
+    <!-- Invoices card -->
+    <div class="entry-card">
+      <div class="entry-card-header invoice-header">
+        <span>☰</span> Invoices
+      </div>
+      <div class="form-group">
+        <label>Client Name</label>
+        <input type="text" name="client_name" class="form-input"
+               placeholder="e.g. ABC Sdn Bhd"/>
+      </div>
+      <div class="form-group">
+        <label>Amount (RM)</label>
+        <input type="number" name="invoices" class="form-input"
+               step="0.01" min="0" placeholder="0.00" required/>
+      </div>
+      <div class="form-group">
+        <label>Status</label>
+        <select name="invoice_status" class="form-input">
+          <option value="unpaid">Unpaid</option>
+          <option value="paid">Paid</option>
+          <option value="overdue">Overdue</option>
+        </select>
+      </div>
+    </div>
+
+  </div><!-- end entry-grid -->
+
+  <div class="form-actions">
+    <button type="submit" class="btn btn-primary btn-lg">
+      Calculate &amp; Save
+    </button>
+  </div>
+
+</form>
+{% endblock %}

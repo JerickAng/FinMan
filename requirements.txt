@@ -1,0 +1,6 @@
+flask
+firebase-admin
+python-dotenv
+pandas
+prophet
+sendgrid

@@ -1,0 +1,80 @@
+{% extends "base.html" %}
+{% block title %}SME Dashboard{% endblock %}
+
+{% block sidebar %}
+  <a href="{{ url_for('sme_dashboard') }}"
+     class="nav-item {% if request.endpoint == 'sme_dashboard' %}active{% endif %}">
+    <span class="nav-icon">▦</span> Dashboard
+  </a>
+  <a href="{{ url_for('sme_data_entry') }}" class="nav-item">
+    <span class="nav-icon">⊕</span> Data Entry
+  </a>
+  <a href="{{ url_for('sme_summary') }}" class="nav-item">
+    <span class="nav-icon">▣</span> Summary
+  </a>
+  <a href="{{ url_for('sme_report') }}" class="nav-item">
+    <span class="nav-icon">☰</span> Report
+  </a>
+{% endblock %}
+
+{% block content %}
+<div class="page-header">
+  <h2 class="page-title">Dashboard Overview — {{ records|length }} record(s)</h2>
+</div>
+
+<!-- KPI Cards -->
+<div class="kpi-grid">
+  <div class="kpi-card">
+    <div class="kpi-label">Net Cash Flow</div>
+    <div class="kpi-value {% if records %}text-green{% endif %}">
+      RM {{ '{:,.0f}'.format(records|sum(attribute='income') - records|sum(attribute='expenses')) if records else '—' }}
+    </div>
+  </div>
+  <div class="kpi-card">
+    <div class="kpi-label">Total Income</div>
+    <div class="kpi-value text-green">
+      RM {{ '{:,.0f}'.format(records|sum(attribute='income')) if records else '—' }}
+    </div>
+  </div>
+  <div class="kpi-card">
+    <div class="kpi-label">Total Expenses</div>
+    <div class="kpi-value text-red">
+      RM {{ '{:,.0f}'.format(records|sum(attribute='expenses')) if records else '—' }}
+    </div>
+  </div>
+  <div class="kpi-card">
+    <div class="kpi-label">Outstanding Invoices</div>
+    <div class="kpi-value">
+      RM {{ '{:,.0f}'.format(records|sum(attribute='invoices')) if records else '—' }}
+    </div>
+  </div>
+</div>
+
+<!-- Chart placeholders -->
+<div class="chart-row">
+  <div class="chart-card">
+    <div class="chart-title">Cash Flow Trends</div>
+    <canvas id="cashFlowChart"></canvas>
+    {% if not records %}
+      <p class="chart-empty">Enter financial data to see your cash flow trends.</p>
+    {% endif %}
+  </div>
+  <div class="chart-card">
+    <div class="chart-title">Income vs Expenses</div>
+    <canvas id="incomeExpenseChart"></canvas>
+    {% if not records %}
+      <p class="chart-empty">Enter financial data to see the comparison.</p>
+    {% endif %}
+  </div>
+</div>
+
+<!-- Quick link -->
+{% if not records %}
+<div class="empty-state">
+  <p>No financial data yet.</p>
+  <a href="{{ url_for('sme_data_entry') }}" class="btn btn-primary">
+    + Enter your first record
+  </a>
+</div>
+{% endif %}
+{% endblock %}

@@ -1,0 +1,111 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8"/>
+  <meta name="viewport" content="width=device-width, initial-scale=1.0"/>
+  <title>FinMan — Sign In</title>
+  <link rel="stylesheet" href="{{ url_for('static', filename='css/main.css') }}"/>
+</head>
+<body class="login-body">
+
+  <div class="login-container">
+
+    <!-- Left panel -->
+    <div class="login-left">
+      <img src="{{ url_for('static', filename='img/logo.png') }}"
+           alt="FinMan" class="login-logo"
+           onerror="this.style.display='none'"/>
+      <h1 class="login-brand">FinMan</h1>
+      <p class="login-tagline">Financial management<br>for SMEs &amp; CFOs</p>
+    </div>
+
+    <!-- Right panel -->
+    <div class="login-right">
+      <h2 class="login-title">Welcome Back</h2>
+      <p class="login-sub">Sign in to your account</p>
+
+      {% with messages = get_flashed_messages(with_categories=true) %}
+        {% if messages %}
+          {% for category, message in messages %}
+            <div class="alert alert-{{ category }}">{{ message }}</div>
+          {% endfor %}
+        {% endif %}
+      {% endwith %}
+
+      <!-- Hidden form — id_token filled by Firebase JS SDK then submitted -->
+      <form id="loginForm" method="POST" action="{{ url_for('login') }}">
+        <input type="hidden" name="id_token" id="id_token"/>
+
+        <div class="form-group">
+          <label for="email">Email address</label>
+          <input type="email" id="email" class="form-input"
+                 placeholder="you@company.com" required/>
+        </div>
+
+        <div class="form-group">
+          <label for="password">Password</label>
+          <input type="password" id="password" class="form-input"
+                 placeholder="••••••••" required/>
+        </div>
+
+        <div class="form-row">
+          <a href="#" class="link-small">Forgot password?</a>
+        </div>
+
+        <button type="submit" id="loginBtn" class="btn btn-primary btn-block">
+          Sign in
+        </button>
+
+        <p id="loginError" class="error-msg" style="display:none;"></p>
+      </form>
+
+      <p class="login-footer">
+        No account? Contact your administrator.
+      </p>
+    </div>
+  </div>
+
+  <!-- Firebase Web SDK (v9 compat) -->
+  <script src="https://www.gstatic.com/firebasejs/9.22.2/firebase-app-compat.js"></script>
+  <script src="https://www.gstatic.com/firebasejs/9.22.2/firebase-auth-compat.js"></script>
+
+  <script>
+    // ── Replace these values with your Firebase project config ──
+    const firebaseConfig = {
+      apiKey:            "YOUR_API_KEY",
+      authDomain:        "YOUR_PROJECT.firebaseapp.com",
+      projectId:         "YOUR_PROJECT_ID",
+      storageBucket:     "YOUR_PROJECT.appspot.com",
+      messagingSenderId: "YOUR_SENDER_ID",
+      appId:             "YOUR_APP_ID",
+    };
+    firebase.initializeApp(firebaseConfig);
+    const auth = firebase.auth();
+
+    document.getElementById("loginForm").addEventListener("submit", async (e) => {
+      e.preventDefault();
+      const email    = document.getElementById("email").value.trim();
+      const password = document.getElementById("password").value;
+      const btn      = document.getElementById("loginBtn");
+      const errEl    = document.getElementById("loginError");
+
+      btn.textContent = "Signing in…";
+      btn.disabled    = true;
+      errEl.style.display = "none";
+
+      try {
+        const result  = await auth.signInWithEmailAndPassword(email, password);
+        const idToken = await result.user.getIdToken();
+        document.getElementById("id_token").value = idToken;
+        e.target.submit();
+      } catch (err) {
+        errEl.textContent   = err.message;
+        errEl.style.display = "block";
+        btn.textContent     = "Sign in";
+        btn.disabled        = false;
+      }
+    });
+  </script>
+
+</body>
+</html>

@@ -1,0 +1,55 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8"/>
+  <meta name="viewport" content="width=device-width, initial-scale=1.0"/>
+  <title>FinMan — {% block title %}Dashboard{% endblock %}</title>
+  <link rel="stylesheet" href="{{ url_for('static', filename='css/main.css') }}"/>
+  {% block head %}{% endblock %}
+</head>
+<body>
+
+  <!-- ── Top navbar ── -->
+  <header class="navbar">
+    <div class="navbar-brand">
+      <img src="{{ url_for('static', filename='img/logo.png') }}"
+           alt="FinMan logo" class="logo-img" onerror="this.style.display='none'"/>
+      <span class="brand-name">FinMan</span>
+    </div>
+    <div class="navbar-right">
+      <span class="bell-icon">🔔</span>
+      <div class="avatar">{{ user.name[0]|upper if user else 'U' }}</div>
+    </div>
+  </header>
+
+  <div class="layout">
+
+    <!-- ── Sidebar ── -->
+    <aside class="sidebar">
+      {% block sidebar %}{% endblock %}
+      <a href="{{ url_for('logout') }}" class="nav-item logout">
+        <span class="nav-icon">⎋</span> Logout
+      </a>
+    </aside>
+
+    <!-- ── Main content ── -->
+    <main class="main-content">
+
+      <!-- Flash messages -->
+      {% with messages = get_flashed_messages(with_categories=true) %}
+        {% if messages %}
+          {% for category, message in messages %}
+            <div class="alert alert-{{ category }}">{{ message }}</div>
+          {% endfor %}
+        {% endif %}
+      {% endwith %}
+
+      {% block content %}{% endblock %}
+
+    </main>
+  </div>
+
+  <script src="{{ url_for('static', filename='js/main.js') }}"></script>
+  {% block scripts %}{% endblock %}
+</body>
+</html>
