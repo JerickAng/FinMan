@@ -1,0 +1,84 @@
+{% extends "base.html" %}
+{% block title %}Overdue Invoices{% endblock %}
+
+{% block sidebar %}
+  <a href="{{ url_for('cfo_dashboard') }}" class="nav-item">
+    <span class="nav-icon">▦</span> Dashboard
+  </a>
+  <a href="{{ url_for('cfo_projection') }}" class="nav-item">
+    <span class="nav-icon">📈</span> Projection
+  </a>
+  <a href="{{ url_for('cfo_invoices') }}"
+     class="nav-item {% if request.endpoint == 'cfo_invoices' %}active{% endif %}">
+    <span class="nav-icon">☰</span> Invoices
+  </a>
+  <a href="{{ url_for('cfo_reminders') }}" class="nav-item">
+    <span class="nav-icon">✉</span> Reminders
+  </a>
+{% endblock %}
+
+{% block content %}
+
+<div class="page-header" style="justify-content:space-between;">
+  <h2 class="page-title">Overdue Invoices</h2>
+  <button onclick="window.print()" class="btn btn-outline">⬇ Export</button>
+</div>
+
+<div class="table-card">
+  <table>
+    <thead>
+      <tr>
+        <th>Invoice No.</th>
+        <th>Client</th>
+        <th>Amount (RM)</th>
+        <th>Due Date</th>
+        <th>Days Overdue</th>
+        <th>Actions</th>
+      </tr>
+    </thead>
+    <tbody>
+      {% if invoices %}
+        {% for inv in invoices %}
+        <tr>
+          <td><strong>{{ inv.invoice_no or '—' }}</strong></td>
+          <td>{{ inv.client_name or '—' }}</td>
+          <td>RM {{ '{:,.2f}'.format(inv.amount|float) }}</td>
+          <td>{{ inv.due_date or '—' }}</td>
+          <td>
+            <span class="badge
+              {% if inv.days_overdue|int > 21 %}badge-red
+              {% elif inv.days_overdue|int > 7 %}badge-amber
+              {% else %}badge-blue{% endif %}">
+              {{ inv.days_overdue }} days
+            </span>
+          </td>
+          <td>
+            <div style="display:flex; gap:8px;">
+              <a href="{{ url_for('cfo_reminders') }}"
+                 class="btn btn-outline" style="font-size:0.78rem; padding:4px 10px;">
+                Remind
+              </a>
+              <a href="/cfo/mark-paid/{{ inv.id }}"
+                 class="btn btn-outline"
+                 style="font-size:0.78rem; padding:4px 10px;
+                        color:var(--green); border-color:var(--green);"
+                 onclick="return confirm('Mark this invoice as paid?')">
+                Mark Paid
+              </a>
+            </div>
+          </td>
+        </tr>
+        {% endfor %}
+      {% else %}
+        <tr>
+          <td colspan="6"
+              style="text-align:center; color:var(--text-muted); padding:2rem;">
+            No overdue invoices. 🎉
+          </td>
+        </tr>
+      {% endif %}
+    </tbody>
+  </table>
+</div>
+
+{% endblock %}

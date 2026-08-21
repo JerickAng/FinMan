@@ -1,0 +1,213 @@
+{% extends "base.html" %}
+{% block title %}CFO Dashboard{% endblock %}
+
+{% block sidebar %}
+  <a href="{{ url_for('cfo_dashboard') }}"
+     class="nav-item {% if request.endpoint == 'cfo_dashboard' %}active{% endif %}">
+    <span class="nav-icon">▦</span> Dashboard
+  </a>
+  <a href="{{ url_for('cfo_projection') }}"
+     class="nav-item {% if request.endpoint == 'cfo_projection' %}active{% endif %}">
+    <span class="nav-icon">📈</span> Projection
+  </a>
+  <a href="{{ url_for('cfo_invoices') }}"
+     class="nav-item {% if request.endpoint == 'cfo_invoices' %}active{% endif %}">
+    <span class="nav-icon">☰</span> Invoices
+  </a>
+  <a href="{{ url_for('cfo_reminders') }}"
+     class="nav-item {% if request.endpoint == 'cfo_reminders' %}active{% endif %}">
+    <span class="nav-icon">✉</span> Reminders
+  </a>
+{% endblock %}
+
+{% block content %}
+
+<div class="page-header">
+  <h2 class="page-title">Dashboard Overview</h2>
+</div>
+
+<!-- KPI Cards -->
+<div class="kpi-grid">
+  <div class="kpi-card">
+    <div class="kpi-label">Net Cash Flow</div>
+    <div class="kpi-value {{ 'text-green' if summary.net_cf_positive else 'text-red' }}">
+      RM {{ '{:,.0f}'.format(summary.net_cash_flow) }}
+    </div>
+    <div class="kpi-sub">Total income minus expenses</div>
+  </div>
+  <div class="kpi-card">
+    <div class="kpi-label">Operating Cash Flow</div>
+    <div class="kpi-value text-green">
+      RM {{ '{:,.0f}'.format(summary.operating_cash_flow) }}
+    </div>
+    <div class="kpi-sub">Core business cash flow</div>
+  </div>
+  <div class="kpi-card">
+    <div class="kpi-label">Current Ratio</div>
+    <div class="kpi-value {{ 'text-green' if summary.current_ratio_ok else 'text-red' }}">
+      {{ summary.current_ratio }}
+    </div>
+    <div class="kpi-sub">Target: 1.5 – 3.0</div>
+  </div>
+  <div class="kpi-card">
+    <div class="kpi-label">Days Sales Outstanding</div>
+    <div class="kpi-value {{ 'text-green' if summary.dso_ok else 'text-red' }}">
+      {{ summary.dso }} Days
+    </div>
+    <div class="kpi-sub">Target: under 45 days</div>
+  </div>
+</div>
+
+<!-- Charts -->
+<div class="chart-row">
+  <div class="chart-card">
+    <div class="chart-title">Cash Flow Trends</div>
+    <canvas id="cashFlowChart" height="140"></canvas>
+    {% if not summary.net_cash_flow %}
+      <p class="chart-empty">Enter financial data to see trends.</p>
+    {% endif %}
+  </div>
+  <div class="chart-card">
+    <div class="chart-title">Income vs Expenses</div>
+    <canvas id="incomeExpenseChart" height="140"></canvas>
+    {% if not summary.net_cash_flow %}
+      <p class="chart-empty">Enter financial data to see comparison.</p>
+    {% endif %}
+  </div>
+</div>
+
+<!-- Additional KPI row -->
+<div class="kpi-grid" style="grid-template-columns: repeat(4,1fr); margin-top: 0;">
+  <div class="kpi-card">
+    <div class="kpi-label">Quick Ratio</div>
+    <div class="kpi-value">{{ summary.quick_ratio }}</div>
+  </div>
+  <div class="kpi-card">
+    <div class="kpi-label">Working Capital</div>
+    <div class="kpi-value">RM {{ '{:,.0f}'.format(summary.working_capital) }}</div>
+  </div>
+  <div class="kpi-card">
+    <div class="kpi-label">AR Turnover</div>
+    <div class="kpi-value">{{ summary.ar_turnover }}x</div>
+  </div>
+  <div class="kpi-card">
+    <div class="kpi-label">Cash Flow Quality</div>
+    <div class="kpi-value">{{ summary.cf_quality }}</div>
+  </div>
+</div>
+
+<!-- Overdue Invoice Summary -->
+<div class="table-card" style="margin-top: 1.4rem;">
+  <div style="padding: 1rem 1.2rem; border-bottom: 1px solid var(--border);">
+    <strong>Overdue Invoice Summary</strong>
+    <a href="{{ url_for('cfo_invoices') }}"
+       style="float:right; font-size:0.82rem;">View all →</a>
+  </div>
+  <table>
+    <thead>
+      <tr>
+        <th>Invoice</th>
+        <th>Client</th>
+        <th>Amount (RM)</th>
+        <th>Days Overdue</th>
+        <th>Status</th>
+      </tr>
+    </thead>
+    <tbody>
+      {% if invoices %}
+        {% for inv in invoices[:5] %}
+        <tr>
+          <td>{{ inv.invoice_no or '—' }}</td>
+          <td>{{ inv.client_name or '—' }}</td>
+          <td>RM {{ '{:,.2f}'.format(inv.amount|float) }}</td>
+          <td>
+            <span class="badge
+              {% if inv.days_overdue|int > 21 %}badge-red
+              {% elif inv.days_overdue|int > 7 %}badge-amber
+              {% else %}badge-blue{% endif %}">
+              {{ inv.days_overdue or '—' }} days
+            </span>
+          </td>
+          <td><span class="badge badge-red">Overdue</span></td>
+        </tr>
+        {% endfor %}
+      {% else %}
+        <tr>
+          <td colspan="5"
+              style="text-align:center; color:var(--text-muted); padding:1.5rem;">
+            No overdue invoices.
+          </td>
+        </tr>
+      {% endif %}
+    </tbody>
+  </table>
+</div>
+
+{% endblock %}
+
+{% block scripts %}
+<script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.0/dist/chart.umd.min.js"></script>
+<script>
+  const chartDefaults = {
+    color: "#F1F5F9",
+    borderColor: "rgba(255,255,255,0.1)",
+  };
+
+  // Cash Flow Trend (line chart)
+  new Chart(document.getElementById("cashFlowChart"), {
+    type: "line",
+    data: {
+      labels: ["Jan","Feb","Mar","Apr","May","Jun"],
+      datasets: [{
+        label: "Net Cash Flow (RM)",
+        data: [12000, 18000, 15000, 22000, 28000, {{ summary.net_cash_flow }}],
+        borderColor: "#2563EB",
+        backgroundColor: "rgba(37,99,235,0.1)",
+        tension: 0.4,
+        fill: true,
+        pointBackgroundColor: "#2563EB",
+      }]
+    },
+    options: {
+      plugins: { legend: { labels: { color: "#F1F5F9" } } },
+      scales: {
+        x: { ticks: { color: "#94A3B8" }, grid: { color: "rgba(255,255,255,0.05)" } },
+        y: { ticks: { color: "#94A3B8" }, grid: { color: "rgba(255,255,255,0.05)" } }
+      }
+    }
+  });
+
+  // Income vs Expenses (bar chart)
+  new Chart(document.getElementById("incomeExpenseChart"), {
+    type: "bar",
+    data: {
+      labels: ["Apr","May","Jun"],
+      datasets: [
+        {
+          label: "Income",
+          data: [{{ summary.total_income * 0.8 }},
+                 {{ summary.total_income * 0.9 }},
+                 {{ summary.total_income }}],
+          backgroundColor: "#16A34A",
+          borderRadius: 4,
+        },
+        {
+          label: "Expenses",
+          data: [{{ summary.total_expenses * 0.8 }},
+                 {{ summary.total_expenses * 0.9 }},
+                 {{ summary.total_expenses }}],
+          backgroundColor: "#DC2626",
+          borderRadius: 4,
+        }
+      ]
+    },
+    options: {
+      plugins: { legend: { labels: { color: "#F1F5F9" } } },
+      scales: {
+        x: { ticks: { color: "#94A3B8" }, grid: { color: "rgba(255,255,255,0.05)" } },
+        y: { ticks: { color: "#94A3B8" }, grid: { color: "rgba(255,255,255,0.05)" } }
+      }
+    }
+  });
+</script>
+{% endblock %}

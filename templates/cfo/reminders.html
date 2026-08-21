@@ -1,0 +1,180 @@
+{% extends "base.html" %}
+{% block title %}Debtor Reminders{% endblock %}
+
+{% block sidebar %}
+  <a href="{{ url_for('cfo_dashboard') }}" class="nav-item">
+    <span class="nav-icon">▦</span> Dashboard
+  </a>
+  <a href="{{ url_for('cfo_projection') }}" class="nav-item">
+    <span class="nav-icon">📈</span> Projection
+  </a>
+  <a href="{{ url_for('cfo_invoices') }}" class="nav-item">
+    <span class="nav-icon">☰</span> Invoices
+  </a>
+  <a href="{{ url_for('cfo_reminders') }}"
+     class="nav-item {% if request.endpoint == 'cfo_reminders' %}active{% endif %}">
+    <span class="nav-icon">✉</span> Reminders
+  </a>
+{% endblock %}
+
+{% block content %}
+
+<div class="page-header">
+  <h2 class="page-title">Configure Debtor Reminders</h2>
+</div>
+
+<div style="display:grid; grid-template-columns:1fr 1.4fr; gap:1.4rem;">
+
+  <!-- Rule builder -->
+  <div class="form-card">
+    <div class="section-title" style="margin-bottom:1.2rem;">Configure reminder rule</div>
+
+    <div class="form-group">
+      <label>Days overdue trigger</label>
+      <select id="ruleDays" class="form-input">
+        <option value="1">1 day</option>
+        <option value="7" selected>7 days</option>
+        <option value="14">14 days</option>
+        <option value="21">21 days</option>
+      </select>
+    </div>
+
+    <div class="form-group">
+      <label>Reminder stage</label>
+      <select id="ruleStage" class="form-input">
+        <option value="Gentle Reminder">Gentle Reminder</option>
+        <option value="Follow-up" selected>Follow-up</option>
+        <option value="Firm Notice">Firm Notice</option>
+        <option value="Final Warning">Final Warning</option>
+      </select>
+    </div>
+
+    <div class="form-group">
+      <label>Email template</label>
+      <textarea id="ruleTemplate" class="form-input"
+                rows="4" style="resize:vertical;"
+                placeholder="Hi {name}, we noticed invoice {inv_no} for RM {amount} is now overdue..."></textarea>
+    </div>
+
+    <button onclick="saveRule()" class="btn btn-primary btn-block" style="margin-top:0.5rem;">
+      Save Rule
+    </button>
+    <p id="ruleMsg" style="font-size:0.82rem; margin-top:0.5rem; display:none;"></p>
+  </div>
+
+  <!-- Active rules + history -->
+  <div>
+    <div class="table-card" style="margin-bottom:1.4rem;">
+      <div style="padding:0.8rem 1.2rem; border-bottom:1px solid var(--border);">
+        <strong>Default Reminder Rules</strong>
+      </div>
+      <table>
+        <thead>
+          <tr><th>Days</th><th>Stage</th><th>Action</th></tr>
+        </thead>
+        <tbody>
+          {% set default_rules = [
+            (1,  'Gentle Reminder', 'badge-green'),
+            (7,  'Follow-up',       'badge-blue'),
+            (14, 'Firm Notice',     'badge-amber'),
+            (21, 'Final Warning',   'badge-red'),
+          ] %}
+          {% for days, stage, badge in default_rules %}
+          <tr>
+            <td>{{ days }} day{{ 's' if days > 1 }}</td>
+            <td><span class="badge {{ badge }}">{{ stage }}</span></td>
+            <td><span class="action-link amber">Edit</span></td>
+          </tr>
+          {% endfor %}
+          {% for rule in rules %}
+          <tr>
+            <td>{{ rule.days }} days</td>
+            <td><span class="badge badge-blue">{{ rule.stage }}</span></td>
+            <td>
+              <a href="/cfo/delete-rule/{{ rule.id }}"
+                 class="action-link red"
+                 onclick="return confirm('Delete this rule?')">Delete</a>
+            </td>
+          </tr>
+          {% endfor %}
+        </tbody>
+      </table>
+    </div>
+
+    <!-- History log -->
+    <div class="table-card">
+      <div style="padding:0.8rem 1.2rem; border-bottom:1px solid var(--border);">
+        <strong>Reminder History Log</strong>
+      </div>
+      <table>
+        <thead>
+          <tr><th>Invoice</th><th>Recipient</th><th>Sent</th><th>Stage</th></tr>
+        </thead>
+        <tbody>
+          {% if logs %}
+            {% for log in logs %}
+            <tr>
+              <td>{{ log.invoice_no or '—' }}</td>
+              <td>{{ log.recipient or '—' }}</td>
+              <td>{{ log.sent_at or '—' }}</td>
+              <td>
+                <span class="badge
+                  {% if log.stage == 'Final Warning' %}badge-red
+                  {% elif log.stage == 'Firm Notice' %}badge-amber
+                  {% elif log.stage == 'Follow-up' %}badge-blue
+                  {% else %}badge-green{% endif %}">
+                  {{ log.stage }}
+                </span>
+              </td>
+            </tr>
+            {% endfor %}
+          {% else %}
+            <tr>
+              <td colspan="4"
+                  style="text-align:center; color:var(--text-muted); padding:1.5rem;">
+                No reminders sent yet.
+              </td>
+            </tr>
+          {% endif %}
+        </tbody>
+      </table>
+    </div>
+  </div>
+
+</div>
+
+{% endblock %}
+
+{% block scripts %}
+<script>
+  async function saveRule() {
+    const days     = document.getElementById("ruleDays").value;
+    const stage    = document.getElementById("ruleStage").value;
+    const template = document.getElementById("ruleTemplate").value;
+    const msg      = document.getElementById("ruleMsg");
+
+    if (!template.trim()) {
+      msg.style.display = "block";
+      msg.style.color   = "var(--red)";
+      msg.textContent   = "Please enter an email template.";
+      return;
+    }
+
+    const res = await fetch("/api/save-reminder-rule", {
+      method:  "POST",
+      headers: { "Content-Type": "application/json" },
+      body:    JSON.stringify({ days, stage, template }),
+    });
+
+    const data = await res.json();
+    msg.style.display = "block";
+    if (data.status === "ok") {
+      msg.style.color = "var(--green)";
+      msg.textContent = "Rule saved. Reload to see it in the list.";
+    } else {
+      msg.style.color = "var(--red)";
+      msg.textContent = "Failed to save rule.";
+    }
+  }
+</script>
+{% endblock %}

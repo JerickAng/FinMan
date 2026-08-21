@@ -1,0 +1,163 @@
+{% extends "base.html" %}
+{% block title %}Cash Flow Projection{% endblock %}
+
+{% block sidebar %}
+  <a href="{{ url_for('cfo_dashboard') }}" class="nav-item">
+    <span class="nav-icon">▦</span> Dashboard
+  </a>
+  <a href="{{ url_for('cfo_projection') }}"
+     class="nav-item {% if request.endpoint == 'cfo_projection' %}active{% endif %}">
+    <span class="nav-icon">📈</span> Projection
+  </a>
+  <a href="{{ url_for('cfo_invoices') }}" class="nav-item">
+    <span class="nav-icon">☰</span> Invoices
+  </a>
+  <a href="{{ url_for('cfo_reminders') }}" class="nav-item">
+    <span class="nav-icon">✉</span> Reminders
+  </a>
+{% endblock %}
+
+{% block content %}
+
+<div class="page-header" style="justify-content: space-between;">
+  <h2 class="page-title">Cash Flow Projection</h2>
+  <div style="display:flex; gap:8px;">
+    <button class="btn btn-outline" onclick="loadForecast(30)" id="btn30">30 Days</button>
+    <button class="btn btn-primary" onclick="loadForecast(60)" id="btn60">60 Days</button>
+    <button class="btn btn-outline" onclick="loadForecast(90)" id="btn90">90 Days</button>
+  </div>
+</div>
+
+<div class="chart-card" style="margin-bottom:1.4rem; min-height:300px;">
+  <div class="chart-title">Actual vs Projected Cash Flow</div>
+  <canvas id="projectionChart" height="220"></canvas>
+  <p id="chartMsg" style="text-align:center; color:var(--text-muted);
+     font-size:0.85rem; margin-top:1rem; display:none;">
+    Loading forecast…
+  </p>
+</div>
+
+<!-- Projection table -->
+<div class="table-card">
+  <div style="padding: 1rem 1.2rem; border-bottom: 1px solid var(--border);">
+    <strong>Projected Values</strong>
+  </div>
+  <table>
+    <thead>
+      <tr>
+        <th>Date</th>
+        <th>Projected Net Cash Flow (RM)</th>
+        <th>Upper Bound (RM)</th>
+        <th>Lower Bound (RM)</th>
+      </tr>
+    </thead>
+    <tbody id="projectionTable">
+      <tr>
+        <td colspan="4" style="text-align:center; color:var(--text-muted); padding:1.5rem;">
+          Select a projection period above to load data.
+        </td>
+      </tr>
+    </tbody>
+  </table>
+</div>
+
+{% endblock %}
+
+{% block scripts %}
+<script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.0/dist/chart.umd.min.js"></script>
+<script>
+  let chart = null;
+
+  async function loadForecast(days) {
+    // Update button styles
+    ["btn30","btn60","btn90"].forEach(id => {
+      document.getElementById(id).className = "btn btn-outline";
+    });
+    document.getElementById("btn"+days).className = "btn btn-primary";
+
+    document.getElementById("chartMsg").style.display = "block";
+    document.getElementById("chartMsg").textContent   = "Loading forecast…";
+
+    try {
+      const res  = await fetch(`/api/forecast?days=${days}`);
+      const data = await res.json();
+
+      if (data.error) {
+        document.getElementById("chartMsg").textContent = data.message || data.error;
+        return;
+      }
+
+      document.getElementById("chartMsg").style.display = "none";
+      renderChart(data.actual, data.projected);
+      renderTable(data.projected);
+
+    } catch (err) {
+      document.getElementById("chartMsg").textContent = "Failed to load forecast.";
+    }
+  }
+
+  function renderChart(actual, projected) {
+    const labels   = [...actual.map(d => d.date), ...projected.map(d => d.date)];
+    const actVals  = [...actual.map(d => d.value), ...projected.map(() => null)];
+    const projVals = [...actual.map(() => null),   ...projected.map(d => d.value)];
+
+    if (chart) chart.destroy();
+
+    chart = new Chart(document.getElementById("projectionChart"), {
+      type: "line",
+      data: {
+        labels,
+        datasets: [
+          {
+            label: "Actual Cash Flow",
+            data: actVals,
+            borderColor: "#2563EB",
+            backgroundColor: "rgba(37,99,235,0.1)",
+            tension: 0.4, fill: true,
+            pointRadius: 4,
+          },
+          {
+            label: "Projected Cash Flow",
+            data: projVals,
+            borderColor: "#D97706",
+            borderDash: [6, 3],
+            backgroundColor: "rgba(217,119,6,0.08)",
+            tension: 0.4, fill: true,
+            pointRadius: 3,
+          }
+        ]
+      },
+      options: {
+        plugins: { legend: { labels: { color: "#F1F5F9" } } },
+        scales: {
+          x: { ticks: { color:"#94A3B8", maxTicksLimit:8 },
+               grid:  { color:"rgba(255,255,255,0.05)" } },
+          y: { ticks: { color:"#94A3B8" },
+               grid:  { color:"rgba(255,255,255,0.05)" } }
+        }
+      }
+    });
+  }
+
+  function renderTable(projected) {
+    const tbody = document.getElementById("projectionTable");
+    if (!projected.length) {
+      tbody.innerHTML = `<tr><td colspan="4"
+        style="text-align:center;color:var(--text-muted);padding:1.5rem;">
+        No projection data available.</td></tr>`;
+      return;
+    }
+    tbody.innerHTML = projected.map(d => `
+      <tr>
+        <td>${d.date}</td>
+        <td class="${d.value >= 0 ? 'text-green' : 'text-red'} bold">
+          RM ${d.value.toLocaleString()}</td>
+        <td>RM ${(d.upper||0).toLocaleString()}</td>
+        <td>RM ${(d.lower||0).toLocaleString()}</td>
+      </tr>`).join("");
+  }
+
+  // Auto-load 30 day forecast on page load
+  loadForecast(60);
+</script>
+{% endblock %}

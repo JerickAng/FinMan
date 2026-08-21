@@ -35,7 +35,7 @@ SESSION_EXPIRY = timedelta(days=5)
 
 # ── Firebase Admin SDK init ───────────────────────────────────────────────────
 # Replace "serviceAccountKey.json" with your downloaded Firebase service account file
-cred = credentials.Certificate("serviceAccountKey.json")
+cred = credentials.Certificate("ServiceAccountKey.json")
 firebase_admin.initialize_app(cred)
 db = firestore.client()
 
