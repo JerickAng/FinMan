@@ -69,27 +69,12 @@ def get_forecast(records: list, horizon: int = 30):
         return jsonify({"actual": actual, "projected": projected, "horizon": horizon})
 
     except ImportError:
-        # Prophet not installed — return mock data so UI still works during dev
-        return _mock_forecast(horizon)
+        # Prophet isn't installed. A real financial forecast is either
+        # computed from real data or not shown at all -- never fabricated.
+        return jsonify({
+            "error": "forecast_unavailable",
+            "message": "Forecasting isn't available right now. Prophet is not installed on the server."
+        }), 503
 
     except Exception as e:
         return jsonify({"error": str(e)}), 500
-
-
-def _mock_forecast(horizon: int):
-    """Returns mock forecast data when Prophet is not yet installed."""
-    today  = datetime.today()
-    actual = [
-        {"date": (today - timedelta(days=30*i)).strftime("%Y-%m-%d"),
-         "value": 15000 + (i * 3000)}
-        for i in range(5, 0, -1)
-    ]
-    projected = [
-        {"date": (today + timedelta(days=i*10)).strftime("%Y-%m-%d"),
-         "value": 34000 + (i * 2000),
-         "upper": 36000 + (i * 2000),
-         "lower": 32000 + (i * 2000)}
-        for i in range(1, (horizon // 10) + 2)
-    ]
-    return jsonify({"actual": actual, "projected": projected,
-                    "horizon": horizon, "mock": True})

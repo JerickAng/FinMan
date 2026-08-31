@@ -3,6 +3,8 @@
 <head>
   <meta charset="UTF-8"/>
   <meta name="viewport" content="width=device-width, initial-scale=1.0"/>
+  <!-- CSRF token available to all JS fetch() calls via this meta tag -->
+  <meta name="csrf-token" content="{{ csrf_token() }}"/>
   <title>FinMan — {% block title %}Dashboard{% endblock %}</title>
   <link rel="stylesheet" href="{{ url_for('static', filename='css/main.css') }}"/>
   {% block head %}{% endblock %}
@@ -13,12 +15,18 @@
   <header class="navbar">
     <div class="navbar-brand">
       <img src="{{ url_for('static', filename='img/logo.png') }}"
-           alt="FinMan logo" class="logo-img" onerror="this.style.display='none'"/>
+           alt="FinMan logo" class="logo-img"
+           onerror="this.style.display='none'"/>
       <span class="brand-name">FinMan</span>
     </div>
     <div class="navbar-right">
       <span class="bell-icon">🔔</span>
-      <div class="avatar">{{ user.name[0]|upper if user else 'U' }}</div>
+      <span style="font-size:0.82rem; color:rgba(255,255,255,0.7);">
+        {{ user.name if user else '' }}
+      </span>
+      <div class="avatar">
+        {{ user.name[0]|upper if user and user.name else 'U' }}
+      </div>
     </div>
   </header>
 
@@ -27,15 +35,22 @@
     <!-- ── Sidebar ── -->
     <aside class="sidebar">
       {% block sidebar %}{% endblock %}
-      <a href="{{ url_for('logout') }}" class="nav-item logout">
-        <span class="nav-icon">⎋</span> Logout
-      </a>
+
+      <!-- Logout as POST form — required for CSRF protection -->
+      <form method="POST" action="{{ url_for('logout') }}"
+            style="margin:0; margin-top:auto;">
+        <input type="hidden" name="csrf_token" value="{{ csrf_token() }}"/>
+        <button type="submit" class="nav-item logout"
+                style="width:100%; background:none; border:none;
+                       cursor:pointer; text-align:left;">
+          <span class="nav-icon">⎋</span> Logout
+        </button>
+      </form>
     </aside>
 
     <!-- ── Main content ── -->
     <main class="main-content">
 
-      <!-- Flash messages -->
       {% with messages = get_flashed_messages(with_categories=true) %}
         {% if messages %}
           {% for category, message in messages %}

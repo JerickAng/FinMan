@@ -91,9 +91,16 @@
             <td>{{ rule.days }} days</td>
             <td><span class="badge badge-blue">{{ rule.stage }}</span></td>
             <td>
-              <a href="/cfo/delete-rule/{{ rule.id }}"
-                 class="action-link red"
-                 onclick="return confirm('Delete this rule?')">Delete</a>
+              <form method="POST"
+                    action="{{ url_for('cfo_delete_rule', rule_id=rule.id) }}"
+                    onsubmit="return confirm('Delete this rule?')"
+                    style="display:inline;">
+                <input type="hidden" name="csrf_token" value="{{ csrf_token() }}"/>
+                <button type="submit" class="action-link red"
+                        style="background:none;border:none;cursor:pointer;">
+                  Delete
+                </button>
+              </form>
             </td>
           </tr>
           {% endfor %}
@@ -160,10 +167,14 @@
       return;
     }
 
+    const csrfToken = document.querySelector('meta[name="csrf-token"]').content;
     const res = await fetch("/api/save-reminder-rule", {
       method:  "POST",
-      headers: { "Content-Type": "application/json" },
-      body:    JSON.stringify({ days, stage, template }),
+      headers: {
+        "Content-Type": "application/json",
+        "X-CSRFToken":  csrfToken,
+      },
+      body: JSON.stringify({ days, stage, template }),
     });
 
     const data = await res.json();

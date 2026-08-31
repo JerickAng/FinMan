@@ -74,6 +74,39 @@ def compute_summary(records: list) -> dict:
     }
 
 
+def compute_monthly_series(records: list) -> list:
+    """
+    Groups records by their `period` field (expected format YYYY-MM) and
+    sums income/expenses/invoices within each period, returning a
+    chronologically sorted list of real data points for charting.
+    Records with a missing or malformed period are grouped under "Unknown"
+    and sorted last, rather than silently dropped or guessed at.
+    """
+    buckets = {}
+    for r in records:
+        period = (r.get("period") or "").strip() or "Unknown"
+        b = buckets.setdefault(period, {"income": 0.0, "expenses": 0.0, "invoices": 0.0})
+        b["income"]   += float(r.get("income",   0) or 0)
+        b["expenses"] += float(r.get("expenses", 0) or 0)
+        b["invoices"] += float(r.get("invoices", 0) or 0)
+
+    def sort_key(period):
+        # Real YYYY-MM periods sort chronologically; "Unknown" sorts last.
+        return (1, "") if period == "Unknown" else (0, period)
+
+    series = []
+    for period in sorted(buckets.keys(), key=sort_key):
+        b = buckets[period]
+        series.append({
+            "period":         period,
+            "income":         round(b["income"], 2),
+            "expenses":       round(b["expenses"], 2),
+            "invoices":       round(b["invoices"], 2),
+            "net_cash_flow":  round(b["income"] - b["expenses"], 2),
+        })
+    return series
+
+
 def _empty_summary() -> dict:
     keys = [
         "total_income", "total_expenses", "total_invoices",

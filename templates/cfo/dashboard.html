@@ -63,14 +63,14 @@
   <div class="chart-card">
     <div class="chart-title">Cash Flow Trends</div>
     <canvas id="cashFlowChart" height="140"></canvas>
-    {% if not summary.net_cash_flow %}
+    {% if not monthly %}
       <p class="chart-empty">Enter financial data to see trends.</p>
     {% endif %}
   </div>
   <div class="chart-card">
     <div class="chart-title">Income vs Expenses</div>
     <canvas id="incomeExpenseChart" height="140"></canvas>
-    {% if not summary.net_cash_flow %}
+    {% if not monthly %}
       <p class="chart-empty">Enter financial data to see comparison.</p>
     {% endif %}
   </div>
@@ -153,14 +153,22 @@
     borderColor: "rgba(255,255,255,0.1)",
   };
 
+  // Real data only -- built server-side from actual financialRecords,
+  // grouped by reporting period. No placeholder/sample values.
+  const monthly = {{ monthly | tojson }};
+  const monthLabels     = monthly.map(m => m.period);
+  const netCashFlowData = monthly.map(m => m.net_cash_flow);
+  const incomeData      = monthly.map(m => m.income);
+  const expensesData    = monthly.map(m => m.expenses);
+
   // Cash Flow Trend (line chart)
   new Chart(document.getElementById("cashFlowChart"), {
     type: "line",
     data: {
-      labels: ["Jan","Feb","Mar","Apr","May","Jun"],
+      labels: monthLabels,
       datasets: [{
         label: "Net Cash Flow (RM)",
-        data: [12000, 18000, 15000, 22000, 28000, {{ summary.net_cash_flow }}],
+        data: netCashFlowData,
         borderColor: "#2563EB",
         backgroundColor: "rgba(37,99,235,0.1)",
         tension: 0.4,
@@ -181,21 +189,17 @@
   new Chart(document.getElementById("incomeExpenseChart"), {
     type: "bar",
     data: {
-      labels: ["Apr","May","Jun"],
+      labels: monthLabels,
       datasets: [
         {
           label: "Income",
-          data: [{{ summary.total_income * 0.8 }},
-                 {{ summary.total_income * 0.9 }},
-                 {{ summary.total_income }}],
+          data: incomeData,
           backgroundColor: "#16A34A",
           borderRadius: 4,
         },
         {
           label: "Expenses",
-          data: [{{ summary.total_expenses * 0.8 }},
-                 {{ summary.total_expenses * 0.9 }},
-                 {{ summary.total_expenses }}],
+          data: expensesData,
           backgroundColor: "#DC2626",
           borderRadius: 4,
         }

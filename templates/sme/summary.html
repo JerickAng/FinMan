@@ -1,0 +1,190 @@
+{% extends "base.html" %}
+{% block title %}Summary{% endblock %}
+
+{% block sidebar %}
+  <a href="{{ url_for('sme_dashboard') }}" class="nav-item">
+    <span class="nav-icon">▦</span> Dashboard
+  </a>
+  <a href="{{ url_for('sme_data_entry') }}" class="nav-item">
+    <span class="nav-icon">⊕</span> Data Entry
+  </a>
+  <a href="{{ url_for('sme_summary') }}"
+     class="nav-item {% if request.endpoint == 'sme_summary' %}active{% endif %}">
+    <span class="nav-icon">▣</span> Summary
+  </a>
+  <a href="{{ url_for('sme_report') }}" class="nav-item">
+    <span class="nav-icon">☰</span> Report
+  </a>
+{% endblock %}
+
+{% block content %}
+
+<div class="page-header" style="justify-content: space-between;">
+  <h2 class="page-title">Financial Summary</h2>
+  <a href="{{ url_for('sme_report') }}" class="btn btn-outline">View Full Report →</a>
+</div>
+
+<!-- Top-line KPI cards -->
+<div class="kpi-grid">
+  <div class="kpi-card">
+    <div class="kpi-label">Net Cash Flow</div>
+    <div class="kpi-value {{ 'text-green' if summary.net_cf_positive else 'text-red' }}">
+      RM {{ '{:,.0f}'.format(summary.net_cash_flow) }}
+    </div>
+    <div class="kpi-sub">Total income minus expenses</div>
+  </div>
+  <div class="kpi-card">
+    <div class="kpi-label">Operating Cash Flow</div>
+    <div class="kpi-value text-green">
+      RM {{ '{:,.0f}'.format(summary.operating_cash_flow) }}
+    </div>
+    <div class="kpi-sub">Core business cash flow</div>
+  </div>
+  <div class="kpi-card">
+    <div class="kpi-label">Free Cash Flow</div>
+    <div class="kpi-value">
+      RM {{ '{:,.0f}'.format(summary.free_cash_flow) }}
+    </div>
+    <div class="kpi-sub">Cash left after obligations</div>
+  </div>
+  <div class="kpi-card">
+    <div class="kpi-label">Working Capital</div>
+    <div class="kpi-value">
+      RM {{ '{:,.0f}'.format(summary.working_capital) }}
+    </div>
+    <div class="kpi-sub">Current assets − liabilities</div>
+  </div>
+</div>
+
+<!-- Income vs Expenses chart -->
+<div class="chart-row">
+  <div class="chart-card">
+    <div class="chart-title">Income vs Expenses</div>
+    <canvas id="incomeExpenseChart" height="140"></canvas>
+    {% if not summary.total_income and not summary.total_expenses %}
+      <p class="chart-empty">Enter financial data to see this chart.</p>
+    {% endif %}
+  </div>
+  <div class="chart-card">
+    <div class="chart-title">Cash Flow Breakdown</div>
+    <canvas id="cashFlowBreakdownChart" height="140"></canvas>
+    {% if not summary.net_cash_flow %}
+      <p class="chart-empty">Enter financial data to see this chart.</p>
+    {% endif %}
+  </div>
+</div>
+
+<!-- Totals row -->
+<div class="table-card" style="margin-top: 1.4rem;">
+  <div style="padding: 1rem 1.2rem; border-bottom: 1px solid var(--border);">
+    <strong>Totals</strong>
+  </div>
+  <table>
+    <tbody>
+      <tr>
+        <td>Total Income</td>
+        <td style="text-align:right;">RM {{ '{:,.2f}'.format(summary.total_income) }}</td>
+      </tr>
+      <tr>
+        <td>Total Expenses</td>
+        <td style="text-align:right;">RM {{ '{:,.2f}'.format(summary.total_expenses) }}</td>
+      </tr>
+      <tr>
+        <td>Total Invoices</td>
+        <td style="text-align:right;">RM {{ '{:,.2f}'.format(summary.total_invoices) }}</td>
+      </tr>
+    </tbody>
+  </table>
+</div>
+
+<!-- Ratios -->
+<div class="kpi-grid" style="grid-template-columns: repeat(4,1fr); margin-top: 1.4rem;">
+  <div class="kpi-card">
+    <div class="kpi-label">Current Ratio</div>
+    <div class="kpi-value {{ 'text-green' if summary.current_ratio_ok else 'text-red' }}">
+      {{ summary.current_ratio }}
+    </div>
+    <div class="kpi-sub">Target: 1.5 – 3.0</div>
+  </div>
+  <div class="kpi-card">
+    <div class="kpi-label">Quick Ratio</div>
+    <div class="kpi-value">{{ summary.quick_ratio }}</div>
+    <div class="kpi-sub">Liquidity without inventory</div>
+  </div>
+  <div class="kpi-card">
+    <div class="kpi-label">Days Sales Outstanding</div>
+    <div class="kpi-value {{ 'text-green' if summary.dso_ok else 'text-red' }}">
+      {{ summary.dso }} Days
+    </div>
+    <div class="kpi-sub">Target: under 45 days</div>
+  </div>
+  <div class="kpi-card">
+    <div class="kpi-label">AR Turnover</div>
+    <div class="kpi-value">{{ summary.ar_turnover }}x</div>
+    <div class="kpi-sub">How often receivables are collected</div>
+  </div>
+</div>
+
+<div class="kpi-grid" style="grid-template-columns: repeat(2,1fr); margin-top: 0;">
+  <div class="kpi-card">
+    <div class="kpi-label">Cash Conversion Cycle</div>
+    <div class="kpi-value">{{ summary.cash_conversion }} Days</div>
+    <div class="kpi-sub">Time to convert spend into cash</div>
+  </div>
+  <div class="kpi-card">
+    <div class="kpi-label">Cash Flow Quality</div>
+    <div class="kpi-value">{{ summary.cf_quality }}</div>
+    <div class="kpi-sub">Operating cash flow vs net income</div>
+  </div>
+</div>
+
+{% endblock %}
+
+{% block scripts %}
+<script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.0/dist/chart.umd.min.js"></script>
+<script>
+  const axisStyle = {
+    ticks: { color: "#94A3B8" },
+    grid:  { color: "rgba(255,255,255,0.05)" }
+  };
+
+  new Chart(document.getElementById("incomeExpenseChart"), {
+    type: "bar",
+    data: {
+      labels: ["Income", "Expenses", "Invoices"],
+      datasets: [{
+        data: [
+          {{ summary.total_income }},
+          {{ summary.total_expenses }},
+          {{ summary.total_invoices }}
+        ],
+        backgroundColor: ["#16A34A", "#DC2626", "#2563EB"],
+        borderRadius: 4,
+      }]
+    },
+    options: {
+      plugins: { legend: { display: false } },
+      scales: { x: axisStyle, y: axisStyle }
+    }
+  });
+
+  new Chart(document.getElementById("cashFlowBreakdownChart"), {
+    type: "bar",
+    data: {
+      labels: ["Operating Cash Flow", "Free Cash Flow"],
+      datasets: [{
+        data: [
+          {{ summary.operating_cash_flow }},
+          {{ summary.free_cash_flow }}
+        ],
+        backgroundColor: ["#2563EB", "#16A34A"],
+        borderRadius: 4,
+      }]
+    },
+    options: {
+      plugins: { legend: { display: false } },
+      scales: { x: axisStyle, y: axisStyle }
+    }
+  });
+</script>
+{% endblock %}

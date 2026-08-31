@@ -58,13 +58,17 @@
                  class="btn btn-outline" style="font-size:0.78rem; padding:4px 10px;">
                 Remind
               </a>
-              <a href="/cfo/mark-paid/{{ inv.id }}"
-                 class="btn btn-outline"
-                 style="font-size:0.78rem; padding:4px 10px;
-                        color:var(--green); border-color:var(--green);"
-                 onclick="return confirm('Mark this invoice as paid?')">
-                Mark Paid
-              </a>
+              <form method="POST"
+                    action="{{ url_for('cfo_mark_paid', invoice_id=inv.id) }}"
+                    onsubmit="return confirm('Mark this invoice as paid?')"
+                    style="display:inline;">
+                <input type="hidden" name="csrf_token" value="{{ csrf_token() }}"/>
+                <button type="submit" class="btn btn-outline"
+                        style="font-size:0.78rem; padding:4px 10px;
+                               color:var(--green); border-color:var(--green);">
+                  Mark Paid
+                </button>
+              </form>
             </div>
           </td>
         </tr>
