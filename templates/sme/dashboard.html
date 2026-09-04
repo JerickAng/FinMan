@@ -15,6 +15,9 @@
   <a href="{{ url_for('sme_report') }}" class="nav-item">
     <span class="nav-icon">☰</span> Report
   </a>
+  <a href="{{ url_for('sme_invoices') }}" class="nav-item">
+    <span class="nav-icon">✉</span> Invoices
+  </a>
 {% endblock %}
 
 {% block content %}
@@ -45,7 +48,7 @@
   <div class="kpi-card">
     <div class="kpi-label">Outstanding Invoices</div>
     <div class="kpi-value">
-      RM {{ '{:,.0f}'.format(records|sum(attribute='invoices')) if records else '—' }}
+      RM {{ '{:,.0f}'.format(outstanding_invoices) if outstanding_invoices else '—' }}
     </div>
   </div>
 </div>
@@ -77,4 +80,68 @@
   </a>
 </div>
 {% endif %}
+{% endblock %}
+
+{% block scripts %}
+<script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.0/dist/chart.umd.min.js"></script>
+<script>
+  const axisStyle = {
+    ticks: { color: "#94A3B8" },
+    grid:  { color: "rgba(255,255,255,0.05)" }
+  };
+
+  const monthlyLabels   = {{ monthly.labels | tojson }};
+  const monthlyIncome   = {{ monthly.income | tojson }};
+  const monthlyExpenses = {{ monthly.expenses | tojson }};
+  const monthlyNet      = {{ monthly.net | tojson }};
+
+  {% if records %}
+  // Cash Flow Trends — net cash flow per period
+  new Chart(document.getElementById("cashFlowChart"), {
+    type: "line",
+    data: {
+      labels: monthlyLabels,
+      datasets: [{
+        label: "Net Cash Flow (RM)",
+        data: monthlyNet,
+        borderColor: "#2563EB",
+        backgroundColor: "rgba(37,99,235,0.1)",
+        tension: 0.4,
+        fill: true,
+        pointBackgroundColor: "#2563EB",
+      }]
+    },
+    options: {
+      plugins: { legend: { labels: { color: "#F1F5F9" } } },
+      scales: { x: axisStyle, y: axisStyle }
+    }
+  });
+
+  // Income vs Expenses per period
+  new Chart(document.getElementById("incomeExpenseChart"), {
+    type: "bar",
+    data: {
+      labels: monthlyLabels,
+      datasets: [
+        {
+          label: "Income",
+          data: monthlyIncome,
+          backgroundColor: "#16A34A",
+          borderRadius: 4,
+        },
+        {
+          label: "Expenses",
+          data: monthlyExpenses,
+          backgroundColor: "#DC2626",
+          borderRadius: 4,
+        }
+      ]
+    },
+    options: {
+      plugins: { legend: { labels: { color: "#F1F5F9" } } },
+      scales: { x: axisStyle, y: axisStyle }
+    }
+  });
+  {% endif %}
+</script>
 {% endblock %}

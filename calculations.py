@@ -5,17 +5,22 @@ Covers: cash flow metrics, liquidity ratios, efficiency ratios,
         cash flow quality ratios.
 """
 
-def compute_summary(records: list) -> dict:
+def compute_summary(records: list, total_invoices: float = 0) -> dict:
     """
-    Takes a list of financial record dicts from Firestore and
-    returns a flat dict of all computed financial metrics.
+    Takes a list of financial record dicts from Firestore and returns a
+    flat dict of all computed financial metrics.
+
+    total_invoices should be the real outstanding-invoices total, sourced
+    from the invoices collection by the caller -- financial records no
+    longer carry an 'invoices' field (invoices moved to their own
+    dedicated feature), so this must be passed in explicitly rather than
+    summed from records.
     """
-    if not records:
+    if not records and not total_invoices:
         return _empty_summary()
 
     total_income   = sum(float(r.get("income",   0) or 0) for r in records)
     total_expenses = sum(float(r.get("expenses", 0) or 0) for r in records)
-    total_invoices = sum(float(r.get("invoices", 0) or 0) for r in records)
 
     # ── Cash Flow & Health Metrics ────────────────────────────────────────────
     net_cash_flow       = total_income - total_expenses

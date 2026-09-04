@@ -5,3 +5,9 @@ python-dotenv
 pandas
 prophet
 sendgrid
+pytesseract
+Pillow
+pdf2image
+pdfplumber
+python-dateutil
+reportlab

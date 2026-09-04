@@ -1,0 +1,174 @@
+{% extends "base.html" %}
+{% block title %}Invoices{% endblock %}
+
+{% block sidebar %}
+  <a href="{{ url_for('sme_dashboard') }}" class="nav-item">
+    <span class="nav-icon">▦</span> Dashboard
+  </a>
+  <a href="{{ url_for('sme_data_entry') }}" class="nav-item">
+    <span class="nav-icon">⊕</span> Data Entry
+  </a>
+  <a href="{{ url_for('sme_summary') }}" class="nav-item">
+    <span class="nav-icon">▣</span> Summary
+  </a>
+  <a href="{{ url_for('sme_report') }}" class="nav-item">
+    <span class="nav-icon">☰</span> Report
+  </a>
+  <a href="{{ url_for('sme_invoices') }}"
+     class="nav-item {% if request.endpoint == 'sme_invoices' %}active{% endif %}">
+    <span class="nav-icon">✉</span> Invoices
+  </a>
+{% endblock %}
+
+{% block content %}
+<div class="page-header">
+  <h2 class="page-title">Invoices</h2>
+</div>
+
+<!-- Create & Send Invoice -->
+<div class="form-card" style="margin-bottom: 1.6rem;">
+  <h3 style="margin-top:0; font-size:1.05rem;">Create &amp; Send Invoice</h3>
+  <form method="POST" action="{{ url_for('sme_invoice_create') }}" id="invoiceForm">
+    <input type="hidden" name="csrf_token" value="{{ csrf_token() }}"/>
+
+    <div class="form-row-2">
+      <div class="form-group">
+        <label>Client Name</label>
+        <input type="text" name="client_name" class="form-input" placeholder="e.g. Sunshine Bakery Sdn Bhd" required/>
+      </div>
+      <div class="form-group">
+        <label>Client Email</label>
+        <input type="email" name="client_email" class="form-input" placeholder="accounts@client.com" required/>
+      </div>
+    </div>
+
+    <div class="form-group" style="max-width:220px;">
+      <label>Due Date</label>
+      <input type="date" name="due_date" class="form-input" required/>
+    </div>
+
+    <label style="display:block; margin: 1rem 0 0.5rem;">Line Items</label>
+    <div id="lineItems">
+      <div class="line-item-row" style="display:flex; gap:8px; margin-bottom:8px; align-items:center;">
+        <input type="text" name="item_description" class="form-input" placeholder="Description" style="flex:3;" required/>
+        <input type="number" name="item_qty" class="form-input line-qty" placeholder="Qty" min="0.01" step="0.01" style="flex:1;" required/>
+        <input type="number" name="item_unit_price" class="form-input line-price" placeholder="Unit Price (RM)" min="0" step="0.01" style="flex:1;" required/>
+        <span class="line-amount" style="flex:1; text-align:right; font-size:0.85rem; color:var(--text-muted);">RM 0.00</span>
+        <button type="button" class="btn btn-outline remove-line" style="padding:4px 10px;">✕</button>
+      </div>
+    </div>
+    <button type="button" id="addLineBtn" class="btn btn-outline" style="margin-top:4px;">+ Add Line</button>
+
+    <div style="text-align:right; margin-top:1rem; font-size:1.1rem;">
+      <strong>Total: RM <span id="invoiceTotal">0.00</span></strong>
+    </div>
+
+    <div class="form-group" style="margin-top:1rem;">
+      <label>Notes (optional)</label>
+      <textarea name="notes" class="form-input" rows="2" placeholder="e.g. Payment due within 14 days."></textarea>
+    </div>
+
+    <div class="form-actions" style="margin-top:1.2rem;">
+      <button type="submit" class="btn btn-primary">Create &amp; Send Invoice</button>
+    </div>
+  </form>
+</div>
+
+<!-- Invoice History -->
+<div class="table-card">
+  <div style="padding: 1rem 1.2rem; border-bottom: 1px solid var(--border);">
+    <strong>Invoice History</strong>
+  </div>
+  <table>
+    <thead>
+      <tr>
+        <th>Invoice No.</th>
+        <th>Client</th>
+        <th>Total (RM)</th>
+        <th>Due Date</th>
+        <th>Status</th>
+        <th>Email</th>
+        <th>Actions</th>
+      </tr>
+    </thead>
+    <tbody>
+      {% if invoices %}
+        {% for inv in invoices %}
+        <tr>
+          <td>{{ inv.invoice_no }}</td>
+          <td>{{ inv.client_name }}</td>
+          <td style="text-align:right;">{{ '{:,.2f}'.format(inv.total or inv.amount or 0) }}</td>
+          <td>{{ inv.due_date }}</td>
+          <td>
+            <span class="badge {% if inv.status == 'paid' %}badge-green{% elif inv.status == 'overdue' %}badge-red{% else %}badge-amber{% endif %}">
+              {{ inv.status }}
+            </span>
+          </td>
+          <td>
+            {% if inv.email_sent %}
+              <span class="badge badge-green">Sent</span>
+            {% else %}
+              <span class="badge">Not sent</span>
+            {% endif %}
+          </td>
+          <td>
+            <a href="{{ url_for('sme_invoice_pdf', invoice_id=inv.id) }}" class="action-link">Download PDF</a>
+          </td>
+        </tr>
+        {% endfor %}
+      {% else %}
+        <tr>
+          <td colspan="7" style="text-align:center; color:var(--text-muted); padding:2rem;">
+            No invoices yet. Create your first one above.
+          </td>
+        </tr>
+      {% endif %}
+    </tbody>
+  </table>
+</div>
+
+{% endblock %}
+
+{% block scripts %}
+<script>
+  function recalcLine(row) {
+    const qty   = parseFloat(row.querySelector(".line-qty").value) || 0;
+    const price = parseFloat(row.querySelector(".line-price").value) || 0;
+    row.querySelector(".line-amount").textContent = "RM " + (qty * price).toFixed(2);
+    recalcTotal();
+  }
+
+  function recalcTotal() {
+    let total = 0;
+    document.querySelectorAll(".line-item-row").forEach(row => {
+      const qty   = parseFloat(row.querySelector(".line-qty").value) || 0;
+      const price = parseFloat(row.querySelector(".line-price").value) || 0;
+      total += qty * price;
+    });
+    document.getElementById("invoiceTotal").textContent = total.toFixed(2);
+  }
+
+  function wireRow(row) {
+    row.querySelectorAll(".line-qty, .line-price").forEach(input => {
+      input.addEventListener("input", () => recalcLine(row));
+    });
+    row.querySelector(".remove-line").addEventListener("click", () => {
+      if (document.querySelectorAll(".line-item-row").length > 1) {
+        row.remove();
+        recalcTotal();
+      }
+    });
+  }
+
+  document.querySelectorAll(".line-item-row").forEach(wireRow);
+
+  document.getElementById("addLineBtn").addEventListener("click", () => {
+    const container = document.getElementById("lineItems");
+    const newRow = container.firstElementChild.cloneNode(true);
+    newRow.querySelectorAll("input").forEach(i => i.value = "");
+    newRow.querySelector(".line-amount").textContent = "RM 0.00";
+    container.appendChild(newRow);
+    wireRow(newRow);
+  });
+</script>
+{% endblock %}

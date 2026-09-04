@@ -15,6 +15,9 @@
   <a href="{{ url_for('sme_report') }}" class="nav-item">
     <span class="nav-icon">☰</span> Report
   </a>
+  <a href="{{ url_for('sme_invoices') }}" class="nav-item">
+    <span class="nav-icon">✉</span> Invoices
+  </a>
 {% endblock %}
 
 {% block content %}
@@ -22,14 +25,48 @@
   <h2 class="page-title">Dashboard Overview — Data Entry</h2>
 </div>
 
-<form method="POST" action="{{ url_for('sme_data_entry') }}">
+<!-- Upload & auto-extract -->
+<div class="form-card" style="margin-bottom: 1.4rem;">
+  <form method="POST" action="{{ url_for('sme_upload_document') }}"
+        enctype="multipart/form-data" style="display:flex; align-items:center; gap:12px; flex-wrap:wrap;">
     <input type="hidden" name="csrf_token" value="{{ csrf_token() }}"/>
+    <div>
+      <label style="display:block; font-weight:600; margin-bottom:4px;">
+        📄 Import from Bill or Statement
+      </label>
+      <small style="color:var(--text-muted); font-size:0.8rem;">
+        PDF, JPG, or PNG. We'll pre-fill the form below for you to review — nothing is saved automatically.
+      </small>
+    </div>
+    <select name="doc_type_hint" class="form-input" style="max-width:240px;" required>
+      <option value="">What kind of document is this?</option>
+      <option value="bill_received">Bill I received (I owe someone)</option>
+      <option value="statement">Bank / financial statement</option>
+    </select>
+    <input type="file" name="document" accept=".pdf,.jpg,.jpeg,.png"
+           class="form-input" style="max-width:260px;" required/>
+    <button type="submit" class="btn btn-outline">Extract Data</button>
+  </form>
+</div>
+
+{% if prefill %}
+  <div class="alert alert-info" style="margin-bottom:1rem;">
+    We've pre-filled what we could confidently read from your document
+    ({{ prefill.doc_type }}). Fields left blank couldn't be identified —
+    please fill those in yourself, and double-check everything before saving.
+  </div>
+{% endif %}
+
+<form method="POST" action="{{ url_for('sme_data_entry') }}">
+  <input type="hidden" name="csrf_token" value="{{ csrf_token() }}"/>
+  <input type="hidden" name="source_document_url" value="{{ source_document_url or '' }}"/>
 
   <!-- Period -->
   <div class="form-group" style="margin-bottom: 1.2rem;">
     <label>Reporting Period (YYYY-MM)</label>
     <input type="text" name="period" class="form-input"
-           placeholder="e.g. 2026-06" style="max-width:200px;" required/>
+           placeholder="e.g. 2026-06" style="max-width:200px;"
+           value="{{ prefill.period if prefill else '' }}" required/>
   </div>
 
   <div class="entry-grid">
@@ -46,7 +83,14 @@
       <div class="form-group">
         <label>Amount (RM)</label>
         <input type="number" name="income" class="form-input"
-               step="0.01" min="0" placeholder="0.00" required/>
+               step="0.01" min="0" placeholder="0.00"
+               style="{{ 'border-color:#D97706; background:rgba(217,119,6,0.08);' if prefill and prefill.amount_low_confidence and prefill.income is not none else '' }}"
+               value="{{ prefill.income if prefill and prefill.income is not none else '' }}"/>
+        {% if prefill and prefill.amount_low_confidence and prefill.income is not none %}
+          <small style="color:#D97706; font-size:0.75rem;">
+            ⚠ Auto-detected — please verify against your statement.
+          </small>
+        {% endif %}
       </div>
       <div class="form-group">
         <label>Category</label>
@@ -66,12 +110,20 @@
       <div class="form-group">
         <label>Expense Name</label>
         <input type="text" name="expense_name" class="form-input"
-               placeholder="e.g. Office rent"/>
+               placeholder="e.g. Office rent"
+               value="{{ prefill.vendor_name if prefill else '' }}"/>
       </div>
       <div class="form-group">
         <label>Amount (RM)</label>
         <input type="number" name="expenses" class="form-input"
-               step="0.01" min="0" placeholder="0.00" required/>
+               step="0.01" min="0" placeholder="0.00"
+               style="{{ 'border-color:#D97706; background:rgba(217,119,6,0.08);' if prefill and prefill.amount_low_confidence and prefill.expenses is not none else '' }}"
+               value="{{ prefill.expenses if prefill and prefill.expenses is not none else '' }}"/>
+        {% if prefill and prefill.amount_low_confidence and prefill.expenses is not none %}
+          <small style="color:#D97706; font-size:0.75rem;">
+            ⚠ Couldn't find a labeled total — this is our best guess (largest amount on the page). Please verify.
+          </small>
+        {% endif %}
       </div>
       <div class="form-group">
         <label>Category</label>
@@ -84,32 +136,37 @@
       </div>
     </div>
 
-    <!-- Invoices card -->
-    <div class="entry-card">
-      <div class="entry-card-header invoice-header">
-        <span>☰</span> Invoices
-      </div>
-      <div class="form-group">
-        <label>Client Name</label>
-        <input type="text" name="client_name" class="form-input"
-               placeholder="e.g. ABC Sdn Bhd"/>
-      </div>
-      <div class="form-group">
-        <label>Amount (RM)</label>
-        <input type="number" name="invoices" class="form-input"
-               step="0.01" min="0" placeholder="0.00" required/>
-      </div>
-      <div class="form-group">
-        <label>Status</label>
-        <select name="invoice_status" class="form-input">
-          <option value="unpaid">Unpaid</option>
-          <option value="paid">Paid</option>
-          <option value="overdue">Overdue</option>
-        </select>
-      </div>
-    </div>
-
   </div><!-- end entry-grid -->
+
+  {% if prefill and prefill.transactions %}
+    <div class="table-card" style="margin-top:1.2rem;">
+      <div style="padding: 0.8rem 1.2rem; border-bottom: 1px solid var(--border);">
+        <strong>Detected Transactions</strong>
+        <span style="color:var(--text-muted); font-size:0.78rem;">
+          — no summary line was found, so these were read line by line. Double-check against your statement.
+        </span>
+      </div>
+      <table>
+        <thead>
+          <tr><th>Date</th><th>Description</th><th style="text-align:right;">Amount (RM)</th><th>Type</th></tr>
+        </thead>
+        <tbody>
+          {% for t in prefill.transactions %}
+          <tr>
+            <td>{{ t.date }}</td>
+            <td>{{ t.description }}</td>
+            <td style="text-align:right;">{{ '{:,.2f}'.format(t.amount) }}</td>
+            <td>
+              <span class="badge {{ 'badge-green' if t.direction == 'income' else 'badge-red' }}">
+                {{ t.direction }}
+              </span>
+            </td>
+          </tr>
+          {% endfor %}
+        </tbody>
+      </table>
+    </div>
+  {% endif %}
 
   <div class="form-actions">
     <button type="submit" class="btn btn-primary btn-lg">
