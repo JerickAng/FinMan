@@ -30,32 +30,54 @@
 <!-- Top-line KPI cards -->
 <div class="kpi-grid">
   <div class="kpi-card">
-    <div class="kpi-label">Net Cash Flow</div>
+    <div class="kpi-label-row">
+      <span class="kpi-label">Net Cash Flow</span>
+      <span class="info-tooltip" tabindex="0">i<span class="tooltip-text">Total income minus total expenses across all entered records. A positive value means your business is generating more cash than it's spending.</span></span>
+    </div>
     <div class="kpi-value {{ 'text-green' if summary.net_cf_positive else 'text-red' }}">
       RM {{ '{:,.0f}'.format(summary.net_cash_flow) }}
     </div>
     <div class="kpi-sub">Total income minus expenses</div>
   </div>
   <div class="kpi-card">
-    <div class="kpi-label">Operating Cash Flow</div>
+    <div class="kpi-label-row">
+      <span class="kpi-label">Operating Cash Flow</span>
+      <span class="info-tooltip" tabindex="0">i<span class="tooltip-text">Cash generated from core business operations, estimated as 85% of net cash flow after excluding non-operating items.</span></span>
+    </div>
     <div class="kpi-value text-green">
       RM {{ '{:,.0f}'.format(summary.operating_cash_flow) }}
     </div>
     <div class="kpi-sub">Core business cash flow</div>
   </div>
   <div class="kpi-card">
-    <div class="kpi-label">Free Cash Flow</div>
+    <div class="kpi-label-row">
+      <span class="kpi-label">Free Cash Flow</span>
+      <span class="info-tooltip" tabindex="0">i<span class="tooltip-text">Cash remaining after operating expenses and estimated reinvestment costs — what's left to save, reinvest, or distribute.</span></span>
+    </div>
     <div class="kpi-value">
       RM {{ '{:,.0f}'.format(summary.free_cash_flow) }}
     </div>
     <div class="kpi-sub">Cash left after obligations</div>
   </div>
   <div class="kpi-card">
-    <div class="kpi-label">Working Capital</div>
+    <div class="kpi-label-row">
+      <span class="kpi-label">Working Capital</span>
+      <span class="info-tooltip" tabindex="0">i<span class="tooltip-text">Current assets minus current liabilities. Measures your ability to cover short-term obligations.</span></span>
+    </div>
     <div class="kpi-value">
       RM {{ '{:,.0f}'.format(summary.working_capital) }}
     </div>
     <div class="kpi-sub">Current assets − liabilities</div>
+  </div>
+  <div class="kpi-card">
+    <div class="kpi-label-row">
+      <span class="kpi-label">Overdue Invoices</span>
+      <span class="info-tooltip" tabindex="0">i<span class="tooltip-text">Total value of invoices you've issued that are now past their due date and still unpaid.</span></span>
+    </div>
+    <div class="kpi-value {{ 'text-red' if overdue_invoices else '' }}">
+      RM {{ '{:,.0f}'.format(overdue_total) }}
+    </div>
+    <div class="kpi-sub">{{ overdue_invoices|length }} invoice{{ 's' if overdue_invoices|length != 1 }} owed to you, past due</div>
   </div>
 </div>
 
@@ -92,10 +114,50 @@
         <td>Total Expenses</td>
         <td style="text-align:right;">RM {{ '{:,.2f}'.format(summary.total_expenses) }}</td>
       </tr>
+    </tbody>
+  </table>
+</div>
+
+<!-- Overdue Invoices — money owed TO the SME by clients, past due -->
+<div class="table-card" style="margin-top: 1.4rem;">
+  <div style="padding: 1rem 1.2rem; border-bottom: 1px solid var(--border);
+              display:flex; justify-content:space-between; align-items:center;">
+    <strong>Overdue Invoices</strong>
+    <a href="{{ url_for('sme_invoices') }}" style="font-size:0.82rem;">Manage invoices →</a>
+  </div>
+  <table>
+    <thead>
       <tr>
-        <td>Total Invoices</td>
-        <td style="text-align:right;">RM {{ '{:,.2f}'.format(summary.total_invoices) }}</td>
+        <th>Invoice No.</th>
+        <th>Client</th>
+        <th>Amount (RM)</th>
+        <th>Days Overdue</th>
       </tr>
+    </thead>
+    <tbody>
+      {% if overdue_invoices %}
+        {% for inv in overdue_invoices %}
+        <tr>
+          <td>{{ inv.invoice_no or '—' }}</td>
+          <td>{{ inv.client_name or '—' }}</td>
+          <td style="text-align:right;">RM {{ '{:,.2f}'.format(inv.amount) }}</td>
+          <td>
+            <span class="badge
+              {% if inv.days_overdue|int > 21 %}badge-red
+              {% elif inv.days_overdue|int > 7 %}badge-amber
+              {% else %}badge-blue{% endif %}">
+              {{ inv.days_overdue or 0 }} days
+            </span>
+          </td>
+        </tr>
+        {% endfor %}
+      {% else %}
+        <tr>
+          <td colspan="4" style="text-align:center; color:var(--text-muted); padding:1.5rem;">
+            No overdue invoices. 🎉
+          </td>
+        </tr>
+      {% endif %}
     </tbody>
   </table>
 </div>
@@ -103,26 +165,38 @@
 <!-- Ratios -->
 <div class="kpi-grid" style="grid-template-columns: repeat(4,1fr); margin-top: 1.4rem;">
   <div class="kpi-card">
-    <div class="kpi-label">Current Ratio</div>
+    <div class="kpi-label-row">
+      <span class="kpi-label">Current Ratio</span>
+      <span class="info-tooltip" tabindex="0">i<span class="tooltip-text">Current assets divided by current liabilities. A ratio between 1.5 and 3.0 generally indicates healthy short-term financial stability.</span></span>
+    </div>
     <div class="kpi-value {{ 'text-green' if summary.current_ratio_ok else 'text-red' }}">
       {{ summary.current_ratio }}
     </div>
     <div class="kpi-sub">Target: 1.5 – 3.0</div>
   </div>
   <div class="kpi-card">
-    <div class="kpi-label">Quick Ratio</div>
+    <div class="kpi-label-row">
+      <span class="kpi-label">Quick Ratio</span>
+      <span class="info-tooltip" tabindex="0">i<span class="tooltip-text">Like the current ratio, but excludes inventory — a stricter test of your ability to cover short-term liabilities with liquid assets.</span></span>
+    </div>
     <div class="kpi-value">{{ summary.quick_ratio }}</div>
     <div class="kpi-sub">Liquidity without inventory</div>
   </div>
   <div class="kpi-card">
-    <div class="kpi-label">Days Sales Outstanding</div>
+    <div class="kpi-label-row">
+      <span class="kpi-label">Days Sales Outstanding</span>
+      <span class="info-tooltip" tabindex="0">i<span class="tooltip-text">Average number of days it takes to collect payment after a sale. Lower is better — under 45 days is considered healthy.</span></span>
+    </div>
     <div class="kpi-value {{ 'text-green' if summary.dso_ok else 'text-red' }}">
       {{ summary.dso }} Days
     </div>
     <div class="kpi-sub">Target: under 45 days</div>
   </div>
   <div class="kpi-card">
-    <div class="kpi-label">AR Turnover</div>
+    <div class="kpi-label-row">
+      <span class="kpi-label">AR Turnover</span>
+      <span class="info-tooltip" tabindex="0">i<span class="tooltip-text">How many times per period you collect your average accounts receivable. Higher values indicate faster collection.</span></span>
+    </div>
     <div class="kpi-value">{{ summary.ar_turnover }}x</div>
     <div class="kpi-sub">How often receivables are collected</div>
   </div>
@@ -130,12 +204,18 @@
 
 <div class="kpi-grid" style="grid-template-columns: repeat(2,1fr); margin-top: 0;">
   <div class="kpi-card">
-    <div class="kpi-label">Cash Conversion Cycle</div>
+    <div class="kpi-label-row">
+      <span class="kpi-label">Cash Conversion Cycle</span>
+      <span class="info-tooltip" tabindex="0">i<span class="tooltip-text">Number of days between paying for expenses and collecting cash from sales. Shorter cycles mean cash is tied up for less time.</span></span>
+    </div>
     <div class="kpi-value">{{ summary.cash_conversion }} Days</div>
     <div class="kpi-sub">Time to convert spend into cash</div>
   </div>
   <div class="kpi-card">
-    <div class="kpi-label">Cash Flow Quality</div>
+    <div class="kpi-label-row">
+      <span class="kpi-label">Cash Flow Quality</span>
+      <span class="info-tooltip" tabindex="0">i<span class="tooltip-text">Ratio of operating cash flow to net income. A value near or above 1 suggests earnings are well-backed by actual cash rather than accounting adjustments.</span></span>
+    </div>
     <div class="kpi-value">{{ summary.cf_quality }}</div>
     <div class="kpi-sub">Operating cash flow vs net income</div>
   </div>
@@ -154,14 +234,13 @@
   new Chart(document.getElementById("incomeExpenseChart"), {
     type: "bar",
     data: {
-      labels: ["Income", "Expenses", "Invoices"],
+      labels: ["Income", "Expenses"],
       datasets: [{
         data: [
           {{ summary.total_income }},
-          {{ summary.total_expenses }},
-          {{ summary.total_invoices }}
+          {{ summary.total_expenses }}
         ],
-        backgroundColor: ["#16A34A", "#DC2626", "#2563EB"],
+        backgroundColor: ["#16A34A", "#DC2626"],
         borderRadius: 4,
       }]
     },

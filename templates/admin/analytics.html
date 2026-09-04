@@ -19,15 +19,24 @@
 
 <div class="kpi-grid" style="grid-template-columns: repeat(3,1fr);">
   <div class="kpi-card">
-    <div class="kpi-label">Total Registered SMEs</div>
+    <div class="kpi-label-row">
+      <span class="kpi-label">Total Registered SMEs</span>
+      <span class="info-tooltip" tabindex="0">i<span class="tooltip-text">Total number of SME and CFO accounts registered in the system, excluding administrators.</span></span>
+    </div>
     <div class="kpi-value">{{ total }}</div>
   </div>
   <div class="kpi-card">
-    <div class="kpi-label">Active Accounts</div>
+    <div class="kpi-label-row">
+      <span class="kpi-label">Active Accounts</span>
+      <span class="info-tooltip" tabindex="0">i<span class="tooltip-text">Number of accounts currently active and able to log in.</span></span>
+    </div>
     <div class="kpi-value text-green">{{ active }}</div>
   </div>
   <div class="kpi-card">
-    <div class="kpi-label">Suspended Accounts</div>
+    <div class="kpi-label-row">
+      <span class="kpi-label">Suspended Accounts</span>
+      <span class="info-tooltip" tabindex="0">i<span class="tooltip-text">Number of accounts that have been suspended by an administrator and cannot log in until restored.</span></span>
+    </div>
     <div class="kpi-value text-red">{{ suspended }}</div>
   </div>
 </div>

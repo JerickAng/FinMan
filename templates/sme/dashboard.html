@@ -28,25 +28,37 @@
 <!-- KPI Cards -->
 <div class="kpi-grid">
   <div class="kpi-card">
-    <div class="kpi-label">Net Cash Flow</div>
+    <div class="kpi-label-row">
+      <span class="kpi-label">Net Cash Flow</span>
+      <span class="info-tooltip" tabindex="0">i<span class="tooltip-text">Total income minus total expenses across all entered records. A positive value means your business is generating more cash than it's spending.</span></span>
+    </div>
     <div class="kpi-value {% if records %}text-green{% endif %}">
       RM {{ '{:,.0f}'.format(records|sum(attribute='income') - records|sum(attribute='expenses')) if records else '—' }}
     </div>
   </div>
   <div class="kpi-card">
-    <div class="kpi-label">Total Income</div>
+    <div class="kpi-label-row">
+      <span class="kpi-label">Total Income</span>
+      <span class="info-tooltip" tabindex="0">i<span class="tooltip-text">Sum of all income entries recorded across every reporting period.</span></span>
+    </div>
     <div class="kpi-value text-green">
       RM {{ '{:,.0f}'.format(records|sum(attribute='income')) if records else '—' }}
     </div>
   </div>
   <div class="kpi-card">
-    <div class="kpi-label">Total Expenses</div>
+    <div class="kpi-label-row">
+      <span class="kpi-label">Total Expenses</span>
+      <span class="info-tooltip" tabindex="0">i<span class="tooltip-text">Sum of all expense entries recorded across every reporting period.</span></span>
+    </div>
     <div class="kpi-value text-red">
       RM {{ '{:,.0f}'.format(records|sum(attribute='expenses')) if records else '—' }}
     </div>
   </div>
   <div class="kpi-card">
-    <div class="kpi-label">Outstanding Invoices</div>
+    <div class="kpi-label-row">
+      <span class="kpi-label">Outstanding Invoices</span>
+      <span class="info-tooltip" tabindex="0">i<span class="tooltip-text">Total value of invoices you've issued that haven't been marked as paid yet (includes both unpaid and overdue invoices).</span></span>
+    </div>
     <div class="kpi-value">
       RM {{ '{:,.0f}'.format(outstanding_invoices) if outstanding_invoices else '—' }}
     </div>

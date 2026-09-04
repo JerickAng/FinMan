@@ -100,6 +100,18 @@ def _get_outstanding_invoices_total(data_uid):
     return sum((i.get("total") or i.get("amount") or 0)
               for i in invoices if i.get("status") != "paid")
 
+def _get_overdue_invoices(data_uid):
+    """Returns the list of invoices this user issued that are now overdue --
+    money owed TO them by their clients that hasn't been paid past the due
+    date. Distinct from 'outstanding', which also includes not-yet-due
+    invoices."""
+    docs = db.collection("users").document(data_uid)\
+             .collection("invoices").where("status", "==", "overdue").stream()
+    invoices = [d.to_dict() | {"id": d.id} for d in docs]
+    for inv in invoices:
+        inv["amount"] = inv.get("total") or inv.get("amount") or 0
+    return sorted(invoices, key=lambda i: i.get("days_overdue", 0), reverse=True)
+
 
 # ── Decorators ────────────────────────────────────────────────────────────────
 def login_required(f):
@@ -319,13 +331,18 @@ def sme_upload_document():
 @role_required("sme")
 def sme_summary():
     from calculations import compute_summary
-    uid     = session["user"]["uid"]
-    records = [r.to_dict() for r in
-               db.collection("users").document(uid)
-                 .collection("financialRecords").stream()]
-    total_invoices = _get_outstanding_invoices_total(uid)
+    uid              = session["user"]["uid"]
+    records          = [r.to_dict() for r in
+                        db.collection("users").document(uid)
+                          .collection("financialRecords").stream()]
+    total_invoices   = _get_outstanding_invoices_total(uid)
+    overdue_invoices = _get_overdue_invoices(uid)
+    overdue_total    = sum(i["amount"] for i in overdue_invoices)
     summary = compute_summary(records, total_invoices=total_invoices)
-    return render_template("sme/summary.html", user=session["user"], summary=summary)
+    return render_template("sme/summary.html", user=session["user"],
+                           summary=summary,
+                           overdue_invoices=overdue_invoices,
+                           overdue_total=overdue_total)
 
 @app.route("/sme/report")
 @login_required
