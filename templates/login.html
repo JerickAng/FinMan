@@ -21,48 +21,77 @@
 
     <!-- Right panel -->
     <div class="login-right">
-      <h2 class="login-title">Welcome Back</h2>
-      <p class="login-sub">Sign in to your account</p>
 
-      {% with messages = get_flashed_messages(with_categories=true) %}
-        {% if messages %}
-          {% for category, message in messages %}
-            <div class="alert alert-{{ category }}">{{ message }}</div>
-          {% endfor %}
-        {% endif %}
-      {% endwith %}
+      <!-- ── Sign-in view ── -->
+      <div id="signInView">
+        <h2 class="login-title">Welcome Back</h2>
+        <p class="login-sub">Sign in to your account</p>
 
-      <!-- Hidden form — id_token filled by Firebase JS SDK then submitted -->
-      <form id="loginForm" method="POST" action="{{ url_for('login') }}">
-        <input type="hidden" name="csrf_token" value="{{ csrf_token() }}"/>
-        <input type="hidden" name="id_token" id="id_token"/>
+        {% with messages = get_flashed_messages(with_categories=true) %}
+          {% if messages %}
+            {% for category, message in messages %}
+              <div class="alert alert-{{ category }}">{{ message }}</div>
+            {% endfor %}
+          {% endif %}
+        {% endwith %}
+
+        <!-- Hidden form — id_token filled by Firebase JS SDK then submitted -->
+        <form id="loginForm" method="POST" action="{{ url_for('login') }}">
+          <input type="hidden" name="csrf_token" value="{{ csrf_token() }}"/>
+          <input type="hidden" name="id_token" id="id_token"/>
+
+          <div class="form-group">
+            <label for="email">Email address</label>
+            <input type="email" id="email" class="form-input"
+                   placeholder="you@company.com" required/>
+          </div>
+
+          <div class="form-group">
+            <label for="password">Password</label>
+            <input type="password" id="password" class="form-input"
+                   placeholder="••••••••" required/>
+          </div>
+
+          <div class="form-row">
+            <a href="#" id="forgotLink" class="link-small">Forgot password?</a>
+          </div>
+
+          <button type="submit" id="loginBtn" class="btn btn-primary btn-block">
+            Sign in
+          </button>
+
+          <p id="loginError" class="error-msg" style="display:none;"></p>
+        </form>
+
+        <p class="login-footer">
+          No account? Contact your administrator.
+        </p>
+      </div>
+
+      <!-- ── Forgot password view ── -->
+      <div id="forgotView" style="display:none;">
+        <h2 class="login-title">Reset Password</h2>
+        <p class="login-sub">
+          Enter your account email and we'll send you a link to reset your password.
+        </p>
 
         <div class="form-group">
-          <label for="email">Email address</label>
-          <input type="email" id="email" class="form-input"
+          <label for="resetEmail">Email address</label>
+          <input type="email" id="resetEmail" class="form-input"
                  placeholder="you@company.com" required/>
         </div>
 
-        <div class="form-group">
-          <label for="password">Password</label>
-          <input type="password" id="password" class="form-input"
-                 placeholder="••••••••" required/>
-        </div>
-
-        <div class="form-row">
-          <a href="#" class="link-small">Forgot password?</a>
-        </div>
-
-        <button type="submit" id="loginBtn" class="btn btn-primary btn-block">
-          Sign in
+        <button type="button" id="resetBtn" class="btn btn-primary btn-block">
+          Send reset link
         </button>
 
-        <p id="loginError" class="error-msg" style="display:none;"></p>
-      </form>
+        <p id="resetMsg" style="font-size:0.82rem; margin-top:0.8rem; display:none;"></p>
 
-      <p class="login-footer">
-        No account? Contact your administrator.
-      </p>
+        <p class="login-footer">
+          <a href="#" id="backToLogin" class="link-small">← Back to sign in</a>
+        </p>
+      </div>
+
     </div>
   </div>
 
@@ -100,12 +129,90 @@
         document.getElementById("id_token").value = idToken;
         e.target.submit();
       } catch (err) {
-        errEl.textContent   = err.message;
+        errEl.textContent   = friendlyAuthError(err.code);
         errEl.style.display = "block";
         btn.textContent     = "Sign in";
         btn.disabled        = false;
       }
     });
+
+    // ── Toggle between sign-in and forgot-password views ─────────────────────
+    const signInView   = document.getElementById("signInView");
+    const forgotView   = document.getElementById("forgotView");
+    const forgotLink   = document.getElementById("forgotLink");
+    const backToLogin  = document.getElementById("backToLogin");
+    const resetEmailEl = document.getElementById("resetEmail");
+    const resetMsg     = document.getElementById("resetMsg");
+
+    forgotLink.addEventListener("click", (e) => {
+      e.preventDefault();
+      // Carry over whatever email the user already typed, if any
+      resetEmailEl.value = document.getElementById("email").value.trim();
+      resetMsg.style.display = "none";
+      signInView.style.display = "none";
+      forgotView.style.display = "block";
+    });
+
+    backToLogin.addEventListener("click", (e) => {
+      e.preventDefault();
+      forgotView.style.display = "none";
+      signInView.style.display = "block";
+    });
+
+    // ── Send password reset email ─────────────────────────────────────────────
+    document.getElementById("resetBtn").addEventListener("click", async () => {
+      const email = resetEmailEl.value.trim();
+      const btn   = document.getElementById("resetBtn");
+
+      if (!email) {
+        resetMsg.style.display = "block";
+        resetMsg.style.color   = "var(--red)";
+        resetMsg.textContent   = "Please enter your email address.";
+        return;
+      }
+
+      btn.disabled    = true;
+      btn.textContent = "Sending…";
+
+      try {
+        await auth.sendPasswordResetEmail(email);
+        resetMsg.style.display = "block";
+        resetMsg.style.color   = "var(--green)";
+        resetMsg.textContent   =
+          "If an account exists for that email, a reset link has been sent. Check your inbox (and spam folder).";
+      } catch (err) {
+        // Firebase intentionally does NOT reveal whether the email exists
+        // for auth/user-not-found, to avoid leaking which emails are
+        // registered. We show the same generic success message for that
+        // case, and only surface genuine errors (bad format, rate limit).
+        if (err.code === "auth/user-not-found") {
+          resetMsg.style.display = "block";
+          resetMsg.style.color   = "var(--green)";
+          resetMsg.textContent   =
+            "If an account exists for that email, a reset link has been sent. Check your inbox (and spam folder).";
+        } else {
+          resetMsg.style.display = "block";
+          resetMsg.style.color   = "var(--red)";
+          resetMsg.textContent   = friendlyAuthError(err.code);
+        }
+      } finally {
+        btn.disabled    = false;
+        btn.textContent = "Send reset link";
+      }
+    });
+
+    // ── Friendly error messages ───────────────────────────────────────────────
+    function friendlyAuthError(code) {
+      const map = {
+        "auth/invalid-email":         "That email address doesn't look valid.",
+        "auth/user-disabled":         "This account has been suspended. Contact your administrator.",
+        "auth/user-not-found":        "Incorrect email or password.",
+        "auth/wrong-password":        "Incorrect email or password.",
+        "auth/too-many-requests":     "Too many attempts. Please wait a few minutes and try again.",
+        "auth/network-request-failed":"Network error. Please check your connection.",
+      };
+      return map[code] || "Something went wrong. Please try again.";
+    }
   </script>
 
 </body>

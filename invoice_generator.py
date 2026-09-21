@@ -21,8 +21,14 @@ def generate_invoice_pdf(invoice: dict, output_path: str, issuer: dict):
         "client_name": str, "client_email": str,
         "line_items": [{"description": str, "qty": float, "unit_price": float}],
         "total": float, "notes": str (optional),
+        "payment_url": str (optional) -- if present, a "Pay this invoice
+            online" link is added above the notes section
     }
-    issuer: {"name": str, "company": str, "email": str}
+    issuer: {
+        "name": str, "company": str, "email": str,
+        "company_reg": str (optional) -- SSM/registration number
+        "company_address": str (optional) -- registered business address
+    }
     """
     styles = getSampleStyleSheet()
     title_style = ParagraphStyle("InvoiceTitle", parent=styles["Title"],
@@ -37,9 +43,15 @@ def generate_invoice_pdf(invoice: dict, output_path: str, issuer: dict):
     story = []
 
     # Header: issuer info + INVOICE title/number side by side
+    issuer_lines = [f"<b>{issuer.get('company') or issuer.get('name', '')}</b>"]
+    if issuer.get("company_reg"):
+        issuer_lines.append(f"Reg. No. {issuer['company_reg']}")
+    if issuer.get("company_address"):
+        issuer_lines.append(issuer["company_address"].replace("\n", "<br/>"))
+    issuer_lines.append(issuer.get("email", ""))
+
     header_data = [[
-        Paragraph(f"<b>{issuer.get('company') or issuer.get('name', '')}</b>"
-                  f"<br/>{issuer.get('email', '')}", normal),
+        Paragraph("<br/>".join(issuer_lines), normal),
         Paragraph(f"<para align='right'><font size=20><b>INVOICE</b></font>"
                   f"<br/>{invoice['invoice_no']}</para>", normal),
     ]]
@@ -88,6 +100,16 @@ def generate_invoice_pdf(invoice: dict, output_path: str, issuer: dict):
         ("BOTTOMPADDING", (0, 0), (-1, -1), 6),
     ]))
     story.append(items_table)
+
+    if invoice.get("payment_url"):
+        story.append(Spacer(1, 6*mm))
+        pay_style = ParagraphStyle("PayLink", parent=normal,
+                                    textColor=colors.HexColor("#2563EB"),
+                                    fontSize=11, alignment=2)  # right-aligned
+        story.append(Paragraph(
+            f'<link href="{invoice["payment_url"]}">'
+            f'<b>Pay this invoice online →</b></link>', pay_style
+        ))
 
     if invoice.get("notes"):
         story.append(Spacer(1, 10*mm))

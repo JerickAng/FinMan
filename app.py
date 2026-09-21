@@ -7,6 +7,7 @@ from datetime import timedelta, datetime
 from flask_wtf.csrf import CSRFProtect
 import os
 import re
+from billplz_gateway import verify_callback_signature, BillplzNotConfigured
 
 load_dotenv()
 
@@ -56,6 +57,7 @@ def _load_user(uid):
         "name":            data.get("name", data.get("email", "")),
         "company":         data.get("company", ""),
         "company_reg":     data.get("company_reg", ""),
+        "company_address": data.get("company_address", ""),
         "linked_sme_uid":  data.get("linked_sme_uid", ""),
         "linked_sme_company": data.get("linked_sme_company", ""),
     }
@@ -100,17 +102,42 @@ def _get_outstanding_invoices_total(data_uid):
     return sum((i.get("total") or i.get("amount") or 0)
               for i in invoices if i.get("status") != "paid")
 
-def _get_overdue_invoices(data_uid):
-    """Returns the list of invoices this user issued that are now overdue --
-    money owed TO them by their clients that hasn't been paid past the due
-    date. Distinct from 'outstanding', which also includes not-yet-due
-    invoices."""
+def _get_receivables(data_uid):
+    """The single source of truth for 'is this invoice overdue'.
+
+    Invoices are created with status='unpaid' and nothing ever flips that
+    to 'overdue' -- there's no background job for it. So instead of
+    trusting a stored status field, we compute days_overdue live from
+    due_date every time this is called. Returns every not-paid invoice
+    with a real, current days_overdue value attached; the caller decides
+    whether >0 counts as 'overdue' for its purposes.
+    """
+    from datetime import date
+    today = date.today()
     docs = db.collection("users").document(data_uid)\
-             .collection("invoices").where("status", "==", "overdue").stream()
-    invoices = [d.to_dict() | {"id": d.id} for d in docs]
-    for inv in invoices:
+             .collection("invoices").where("status", "!=", "paid").stream()
+    invoices = []
+    for d in docs:
+        inv = d.to_dict() | {"id": d.id}
         inv["amount"] = inv.get("total") or inv.get("amount") or 0
-    return sorted(invoices, key=lambda i: i.get("days_overdue", 0), reverse=True)
+        due_raw = inv.get("due_date", "")
+        days_overdue = 0
+        for fmt in ("%Y-%m-%d", "%Y-%m"):
+            try:
+                due_date = datetime.strptime(due_raw, fmt).date()
+                days_overdue = max((today - due_date).days, 0)
+                break
+            except (ValueError, TypeError):
+                continue
+        inv["days_overdue"] = days_overdue
+        invoices.append(inv)
+    return invoices
+
+def _get_overdue_invoices(data_uid):
+    """Invoices past their due date, most overdue first."""
+    receivables = _get_receivables(data_uid)
+    overdue = [i for i in receivables if i["days_overdue"] > 0]
+    return sorted(overdue, key=lambda i: i["days_overdue"], reverse=True)
 
 
 # ── Decorators ────────────────────────────────────────────────────────────────
@@ -434,10 +461,42 @@ def sme_invoice_create():
     }
 
     issuer = {
-        "name":    session["user"].get("name", ""),
-        "company": session["user"].get("company", ""),
-        "email":   session["user"].get("email", ""),
+        "name":            session["user"].get("name", ""),
+        "company":         session["user"].get("company", ""),
+        "email":           session["user"].get("email", ""),
+        "company_reg":     session["user"].get("company_reg", ""),
+        "company_address": session["user"].get("company_address", ""),
     }
+
+    # Save the invoice first so we have a real invoice_id to attach the
+    # Billplz bill to, and so the record exists even if PDF/email/payment
+    # link creation hits a snag afterwards.
+    _, invoice_ref = db.collection("users").document(uid).collection("invoices").add(invoice_record)
+
+    # Create a payable link so the client can pay online and the invoice
+    # gets marked paid automatically via the /webhooks/billplz callback --
+    # no manual "Mark Paid" click needed. Gracefully skipped if Billplz
+    # isn't configured yet, same pattern as email.
+    payment_url = None
+    try:
+        from billplz_gateway import create_bill, BillplzNotConfigured
+        bill = create_bill(
+            amount=total,
+            email=client_email,
+            name=client_name,
+            description=f"Invoice {invoice_no}",
+            callback_url=url_for("billplz_webhook", _external=True),
+        )
+        payment_url = bill["url"]
+        db.collection("billplzBills").document(bill["id"]).set({
+            "data_uid": uid, "invoice_id": invoice_ref.id,
+        })
+        invoice_ref.update({"billplz_bill_id": bill["id"], "payment_url": payment_url})
+        invoice_record["payment_url"] = payment_url  # so the PDF generated below includes it too
+    except BillplzNotConfigured:
+        pass
+    except Exception as e:
+        flash(f"Invoice {invoice_no} saved, but the payment link couldn't be created: {e}", "warning")
 
     with tempfile.NamedTemporaryFile(suffix=".pdf", delete=False) as tmp:
         pdf_path = tmp.name
@@ -446,16 +505,15 @@ def sme_invoice_create():
 
         try:
             send_invoice_email(client_email, client_name, invoice_no, total, due_date,
-                               pdf_path, from_email=issuer["email"], from_name=issuer["name"])
-            invoice_record["email_sent"] = True
+                               pdf_path, from_email=issuer["email"], from_name=issuer["name"],
+                               payment_url=payment_url)
+            invoice_ref.update({"email_sent": True})
             flash(f"Invoice {invoice_no} created and emailed to {client_email}.", "success")
         except EmailNotConfigured:
             flash(f"Invoice {invoice_no} created and saved, but email wasn't sent — "
                   f"SendGrid isn't configured yet. You can download the PDF below and send it manually.", "warning")
         except Exception as e:
             flash(f"Invoice {invoice_no} created and saved, but sending the email failed: {e}", "warning")
-
-        db.collection("users").document(uid).collection("invoices").add(invoice_record)
 
     finally:
         os.remove(pdf_path)
@@ -479,9 +537,11 @@ def sme_invoice_pdf(invoice_id):
 
     invoice_record = doc.to_dict()
     issuer = {
-        "name":    session["user"].get("name", ""),
-        "company": session["user"].get("company", ""),
-        "email":   session["user"].get("email", ""),
+        "name":            session["user"].get("name", ""),
+        "company":         session["user"].get("company", ""),
+        "email":           session["user"].get("email", ""),
+        "company_reg":     session["user"].get("company_reg", ""),
+        "company_address": session["user"].get("company_address", ""),
     }
 
     with tempfile.NamedTemporaryFile(suffix=".pdf", delete=False) as tmp:
@@ -489,6 +549,50 @@ def sme_invoice_pdf(invoice_id):
     generate_invoice_pdf(invoice_record, pdf_path, issuer)
     return send_file(pdf_path, as_attachment=True,
                      download_name=f"{invoice_record.get('invoice_no', 'invoice')}.pdf")
+
+
+@csrf.exempt   # Billplz posts this server-to-server, with no CSRF token
+@app.route("/webhooks/billplz", methods=["POST"])
+def billplz_webhook():
+    from billplz_gateway import verify_callback_signature, get_bill, BillplzNotConfigured
+
+    form_data = request.form.to_dict()
+    bill_id   = form_data.get("id")
+    if not bill_id:
+        return "Missing bill id", 400
+
+    # Best-effort signature check -- logged for visibility, but not a hard
+    # gate (see the note in billplz_gateway.verify_callback_signature).
+    # The real security boundary is the direct API confirmation below.
+    try:
+        sig_ok = verify_callback_signature(form_data)
+        if not sig_ok:
+            print(f"Billplz webhook: signature did not match for bill {bill_id} "
+                  f"-- proceeding anyway based on direct API confirmation.")
+    except BillplzNotConfigured:
+        pass
+
+    # Authoritative check: ask Billplz directly whether this bill is
+    # actually paid, rather than trusting the callback body alone.
+    try:
+        bill = get_bill(bill_id)
+    except Exception as e:
+        print(f"Billplz webhook: couldn't verify bill {bill_id} via API: {e}")
+        return "Verification failed", 502
+
+    if not bill.get("paid"):
+        return "OK", 200   # not actually paid according to Billplz itself
+
+    lookup = db.collection("billplzBills").document(bill_id).get()
+    if not lookup.exists:
+        return "Unknown bill", 404
+
+    ref = lookup.to_dict()
+    db.collection("users").document(ref["data_uid"])\
+      .collection("invoices").document(ref["invoice_id"])\
+      .update({"status": "paid", "paid_via": "billplz", "billplz_bill_id": bill_id})
+
+    return "OK", 200
 
 
 # ── CFO routes ────────────────────────────────────────────────────────────────
@@ -502,10 +606,7 @@ def cfo_dashboard():
     records      = [r.to_dict() for r in
                     db.collection("users").document(data_uid)
                       .collection("financialRecords").stream()]
-    invoices     = [r.to_dict() | {"id": r.id} for r in
-                    db.collection("users").document(data_uid)
-                      .collection("invoices")
-                      .where("status", "==", "overdue").stream()]
+    invoices     = _get_overdue_invoices(data_uid)
     summary      = compute_summary(records, total_invoices=_get_outstanding_invoices_total(data_uid))
     monthly      = compute_monthly_series(records)
     linked_co    = session["user"].get("linked_sme_company", "")
@@ -525,20 +626,20 @@ def cfo_projection():
 def cfo_invoices():
     uid      = session["user"]["uid"]
     data_uid = _get_data_uid(uid)
-    invoices = [r.to_dict() | {"id": r.id} for r in
-                db.collection("users").document(data_uid)
-                  .collection("invoices")
-                  .where("status", "==", "overdue").stream()]
+    invoices = _get_overdue_invoices(data_uid)
     return render_template("cfo/invoices.html", user=session["user"], invoices=invoices)
 
 @app.route("/cfo/reminders")
 @login_required
 @role_required("cfo")
 def cfo_reminders():
+    from reminder_engine import ensure_default_rules
     uid   = session["user"]["uid"]
+    ensure_default_rules(db, uid)   # first visit: seed the 4 defaults as real, editable rows
     rules = [r.to_dict() | {"id": r.id} for r in
              db.collection("users").document(uid)
                .collection("reminderRules").stream()]
+    rules = sorted(rules, key=lambda r: r.get("days", 0))
     logs  = [r.to_dict() for r in
              db.collection("users").document(uid)
                .collection("reminderLogs")
@@ -546,6 +647,25 @@ def cfo_reminders():
                .limit(20).stream()]
     return render_template("cfo/reminders.html", user=session["user"],
                            rules=rules, logs=logs)
+
+@app.route("/cfo/run-reminders", methods=["POST"])
+@login_required
+@role_required("cfo")
+def cfo_run_reminders():
+    from reminder_engine import run_reminder_check
+    uid      = session["user"]["uid"]
+    data_uid = _get_data_uid(uid)
+    result   = run_reminder_check(db, cfo_uid=uid, data_uid=data_uid,
+                                  issuer=session["user"])
+    if result["sent"]:
+        flash(f"Sent {result['sent']} reminder(s). "
+              f"{result['skipped']} invoice(s) didn't need one yet.", "success")
+    else:
+        flash(f"No reminders needed right now. "
+              f"{result['skipped']} overdue invoice(s) checked.", "info")
+    for err in result["errors"]:
+        flash(err, "warning")
+    return redirect(url_for("cfo_reminders"))
 
 @app.route("/cfo/mark-paid/<invoice_id>", methods=["POST"])
 @login_required
@@ -631,6 +751,7 @@ def admin_add_account():
         name             = request.form.get("name", "").strip()
         company          = request.form.get("company", "").strip()
         company_reg      = request.form.get("company_reg", "").strip()
+        company_address  = request.form.get("company_address", "").strip()
         role             = request.form.get("role", "sme")
         linked_sme_uid   = request.form.get("linked_sme_uid", "")
         registered       = request.form.get("registered", "")
@@ -652,6 +773,7 @@ def admin_add_account():
                 "email":       email,
                 "company":     company,
                 "company_reg": company_reg,
+                "company_address": company_address,
                 "role":        role,
                 "status":      "active",
                 "registered":  registered,

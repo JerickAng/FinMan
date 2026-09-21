@@ -19,8 +19,15 @@
 
 {% block content %}
 
-<div class="page-header">
+<div class="page-header" style="justify-content:space-between;">
   <h2 class="page-title">Configure Debtor Reminders</h2>
+  <form method="POST" action="{{ url_for('cfo_run_reminders') }}"
+        onsubmit="return confirm('Check all overdue invoices and send any reminders that are due now?')">
+    <input type="hidden" name="csrf_token" value="{{ csrf_token() }}"/>
+    <button type="submit" class="btn btn-primary">
+      ▶ Run Reminder Check Now
+    </button>
+  </form>
 </div>
 
 <div style="display:grid; grid-template-columns:1fr 1.4fr; gap:1.4rem;">
@@ -66,44 +73,51 @@
   <div>
     <div class="table-card" style="margin-bottom:1.4rem;">
       <div style="padding:0.8rem 1.2rem; border-bottom:1px solid var(--border);">
-        <strong>Default Reminder Rules</strong>
+        <strong>Reminder Rules</strong>
+        <span style="color:var(--text-muted); font-size:0.78rem;">
+          — applied in order of days overdue; each invoice gets the most
+          advanced stage it currently qualifies for
+        </span>
       </div>
       <table>
         <thead>
-          <tr><th>Days</th><th>Stage</th><th>Action</th></tr>
+          <tr><th>Days Overdue</th><th>Stage</th><th>Action</th></tr>
         </thead>
         <tbody>
-          {% set default_rules = [
-            (1,  'Gentle Reminder', 'badge-green'),
-            (7,  'Follow-up',       'badge-blue'),
-            (14, 'Firm Notice',     'badge-amber'),
-            (21, 'Final Warning',   'badge-red'),
-          ] %}
-          {% for days, stage, badge in default_rules %}
-          <tr>
-            <td>{{ days }} day{{ 's' if days > 1 }}</td>
-            <td><span class="badge {{ badge }}">{{ stage }}</span></td>
-            <td><span class="action-link amber">Edit</span></td>
-          </tr>
-          {% endfor %}
-          {% for rule in rules %}
-          <tr>
-            <td>{{ rule.days }} days</td>
-            <td><span class="badge badge-blue">{{ rule.stage }}</span></td>
-            <td>
-              <form method="POST"
-                    action="{{ url_for('cfo_delete_rule', rule_id=rule.id) }}"
-                    onsubmit="return confirm('Delete this rule?')"
-                    style="display:inline;">
-                <input type="hidden" name="csrf_token" value="{{ csrf_token() }}"/>
-                <button type="submit" class="action-link red"
-                        style="background:none;border:none;cursor:pointer;">
-                  Delete
-                </button>
-              </form>
-            </td>
-          </tr>
-          {% endfor %}
+          {% if rules %}
+            {% for rule in rules %}
+            <tr>
+              <td>{{ rule.days }} day{{ 's' if rule.days != 1 }}</td>
+              <td>
+                <span class="badge
+                  {% if rule.stage == 'Final Warning' %}badge-red
+                  {% elif rule.stage == 'Firm Notice' %}badge-amber
+                  {% elif rule.stage == 'Follow-up' %}badge-blue
+                  {% else %}badge-green{% endif %}">
+                  {{ rule.stage }}
+                </span>
+              </td>
+              <td>
+                <form method="POST"
+                      action="{{ url_for('cfo_delete_rule', rule_id=rule.id) }}"
+                      onsubmit="return confirm('Delete this rule?')"
+                      style="display:inline;">
+                  <input type="hidden" name="csrf_token" value="{{ csrf_token() }}"/>
+                  <button type="submit" class="action-link red"
+                          style="background:none;border:none;cursor:pointer;">
+                    Delete
+                  </button>
+                </form>
+              </td>
+            </tr>
+            {% endfor %}
+          {% else %}
+            <tr>
+              <td colspan="3" style="text-align:center; color:var(--text-muted); padding:1.5rem;">
+                No rules configured.
+              </td>
+            </tr>
+          {% endif %}
         </tbody>
       </table>
     </div>
@@ -115,7 +129,7 @@
       </div>
       <table>
         <thead>
-          <tr><th>Invoice</th><th>Recipient</th><th>Sent</th><th>Stage</th></tr>
+          <tr><th>Invoice</th><th>Recipient</th><th>Sent</th><th>Stage</th><th>Email</th></tr>
         </thead>
         <tbody>
           {% if logs %}
@@ -123,7 +137,7 @@
             <tr>
               <td>{{ log.invoice_no or '—' }}</td>
               <td>{{ log.recipient or '—' }}</td>
-              <td>{{ log.sent_at or '—' }}</td>
+              <td>{{ log.sent_at[:16].replace('T', ' ') if log.sent_at else '—' }}</td>
               <td>
                 <span class="badge
                   {% if log.stage == 'Final Warning' %}badge-red
@@ -133,13 +147,20 @@
                   {{ log.stage }}
                 </span>
               </td>
+              <td>
+                {% if log.email_status == 'sent' %}
+                  <span class="badge badge-green">Sent</span>
+                {% else %}
+                  <span class="badge badge-amber" title="SendGrid not configured">Not sent</span>
+                {% endif %}
+              </td>
             </tr>
             {% endfor %}
           {% else %}
             <tr>
-              <td colspan="4"
+              <td colspan="5"
                   style="text-align:center; color:var(--text-muted); padding:1.5rem;">
-                No reminders sent yet.
+                No reminders sent yet. Click "Run Reminder Check Now" above.
               </td>
             </tr>
           {% endif %}
