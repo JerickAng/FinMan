@@ -15,6 +15,9 @@
   <a href="{{ url_for('sme_report') }}" class="nav-item">
     <span class="nav-icon">☰</span> Report
   </a>
+  <a href="{{ url_for('sme_profit_loss') }}" class="nav-item">
+    <span class="nav-icon">📄</span> Profit &amp; Loss
+  </a>
   <a href="{{ url_for('sme_invoices') }}" class="nav-item">
     <span class="nav-icon">✉</span> Invoices
   </a>
@@ -22,7 +25,7 @@
 
 {% block content %}
 <div class="page-header">
-  <h2 class="page-title">Dashboard Overview — Data Entry</h2>
+  <h2 class="page-title">Data Entry</h2>
 </div>
 
 <!-- Upload & auto-extract -->
@@ -38,11 +41,23 @@
         PDF, JPG, or PNG. We'll pre-fill the form below for you to review — nothing is saved automatically.
       </small>
     </div>
-    <select name="doc_type_hint" class="form-input" style="max-width:240px;" required>
-      <option value="">What kind of document is this?</option>
-      <option value="bill_received">Bill I received (I owe someone)</option>
-      <option value="statement">Bank / financial statement</option>
-    </select>
+    <div style="min-width:300px; max-width:380px;">
+      <select name="doc_type_hint" id="docTypeHint" class="form-input" required>
+        <option value="">What is this document about?</option>
+        <optgroup label="Money going OUT (I have to pay)">
+          <option value="bill_received">A bill I need to pay (supplier invoice, rent, utilities)</option>
+        </optgroup>
+        <optgroup label="Money coming IN (I get paid)">
+          <option value="receipt_issued">A receipt or invoice I issued to a customer (sales, services)</option>
+        </optgroup>
+        <optgroup label="Both">
+          <option value="statement">A bank statement (shows money in and out)</option>
+        </optgroup>
+      </select>
+      <small id="docTypeHelp" style="display:block; margin-top:4px; color:var(--text-muted); font-size:0.78rem;">
+        Pick the one that matches, so the amount lands in the right box.
+      </small>
+    </div>
     <input type="file" name="document" accept=".pdf,.jpg,.jpeg,.png"
            class="form-input" style="max-width:260px;" required/>
     <button type="submit" class="btn btn-outline">Extract Data</button>
@@ -52,8 +67,30 @@
 {% if prefill %}
   <div class="alert alert-info" style="margin-bottom:1rem;">
     We've pre-filled what we could confidently read from your document
-    ({{ prefill.doc_type }}). Fields left blank couldn't be identified —
-    please fill those in yourself, and double-check everything before saving.
+    ({{ {'bill_received': 'a bill you need to pay',
+         'receipt_issued': 'a receipt or invoice you issued',
+         'invoice_issued': 'an invoice you issued',
+         'statement': 'a bank statement'}.get(prefill.doc_type, prefill.doc_type) }}).
+    {% if prefill.doc_type == 'bill_received' %}
+      <strong>It was treated as money going out, so the amount is in the Expenses box.</strong>
+    {% elif prefill.doc_type in ('receipt_issued', 'invoice_issued') %}
+      <strong>It was treated as money coming in, so the amount is in the Income box.</strong>
+    {% elif prefill.doc_type == 'statement' %}
+      <strong>Money in went to the Income box and money out to the Expenses box.</strong>
+    {% endif %}
+    Fields left blank couldn't be identified — please fill those in yourself,
+    and double-check everything before saving. If it landed in the wrong box,
+    upload it again with the right document type.
+    <br/><small>
+      Read by:
+      {% if prefill.engine == 'vlm' %}
+        FinMan AI reader (fine-tuned model)
+      {% else %}
+        OCR and text matching
+        {% if prefill.vlm_fallback_reason %}&mdash; AI reader not used: {{ prefill.vlm_fallback_reason }}{% endif %}
+      {% endif %}
+    </small>
+    {% for n in (prefill.notes or []) %}<br/><small>&#9888; {{ n }}</small>{% endfor %}
   </div>
 {% endif %}
 
@@ -72,9 +109,10 @@
   <div class="entry-grid">
 
     <!-- Income card -->
-    <div class="entry-card">
+    <div class="entry-card"
+         style="{{ 'outline:2px solid #16A34A; outline-offset:-2px;' if prefill and prefill.income is not none else '' }}">
       <div class="entry-card-header income-header">
-        <span>↗</span> Income
+        <span>↗</span> Income <small style="font-weight:400;">&mdash; money I received</small>
       </div>
       <div class="form-group">
         <label>Source</label>
@@ -93,19 +131,22 @@
         {% endif %}
       </div>
       <div class="form-group">
-        <label>Category</label>
-        <select name="category" class="form-input">
-          <option value="Sales">Sales</option>
-          <option value="Service">Service</option>
-          <option value="Other">Other</option>
-        </select>
+        <label>Category <span class="opt">(optional)</span></label>
+        <input type="text" name="category" class="form-input" list="incomeCategories"
+               maxlength="40" placeholder="Pick one or type your own" autocomplete="off"/>
+        <datalist id="incomeCategories">
+          <option value="Sales"></option>
+          <option value="Service"></option>
+          <option value="Other"></option>
+        </datalist>
       </div>
     </div>
 
     <!-- Expenses card -->
-    <div class="entry-card">
+    <div class="entry-card"
+         style="{{ 'outline:2px solid #DC2626; outline-offset:-2px;' if prefill and prefill.expenses is not none else '' }}">
       <div class="entry-card-header expense-header">
-        <span>↘</span> Expenses
+        <span>↘</span> Expenses <small style="font-weight:400;">&mdash; money I paid</small>
       </div>
       <div class="form-group">
         <label>Expense Name</label>
@@ -121,22 +162,53 @@
                value="{{ prefill.expenses if prefill and prefill.expenses is not none else '' }}"/>
         {% if prefill and prefill.amount_low_confidence and prefill.expenses is not none %}
           <small style="color:#D97706; font-size:0.75rem;">
-            ⚠ Couldn't find a labeled total — this is our best guess (largest amount on the page). Please verify.
+            ⚠ {{ prefill.amount_low_confidence_reason or "Please verify this amount against your document." }}
           </small>
         {% endif %}
       </div>
       <div class="form-group">
-        <label>Category</label>
-        <select name="expense_category" class="form-input">
-          <option value="Rent">Rent</option>
-          <option value="Payroll">Payroll</option>
-          <option value="Utilities">Utilities</option>
-          <option value="Other">Other</option>
-        </select>
+        <label>Category <span class="opt">(optional)</span></label>
+        <input type="text" name="expense_category" class="form-input" list="expenseCategories"
+               maxlength="40" placeholder="Pick one or type your own" autocomplete="off"/>
+        <datalist id="expenseCategories">
+          <option value="Rent"></option>
+          <option value="Payroll"></option>
+          <option value="Utilities"></option>
+          <option value="Depreciation"></option>
+          <option value="Other"></option>
+        </datalist>
       </div>
     </div>
 
   </div><!-- end entry-grid -->
+
+  <!-- Balance sheet snapshot (optional, collapsed by default) -->
+  <details class="entry-card bs-card" style="margin-top:1.2rem;">
+    <summary>
+      <span class="entry-card-header" style="display:inline; border:0; padding:0; background:none;">
+        Balance Sheet Snapshot <span class="opt">(optional)</span>
+      </span>
+      <small class="bs-hint">Closing balances for this period. Needed for Current Ratio, Quick Ratio and Working Capital. Click to open.</small>
+    </summary>
+    <div class="bs-grid">
+      <div class="form-group">
+        <label>Cash &amp; Bank Balance (RM)</label>
+        <input type="number" name="cash" class="form-input" step="0.01" min="0" placeholder="0.00"/>
+      </div>
+      <div class="form-group">
+        <label>Inventory (RM)</label>
+        <input type="number" name="inventory" class="form-input" step="0.01" min="0" placeholder="0.00"/>
+      </div>
+      <div class="form-group">
+        <label>Accounts Payable (RM)</label>
+        <input type="number" name="accounts_payable" class="form-input" step="0.01" min="0" placeholder="0.00"/>
+      </div>
+      <div class="form-group">
+        <label>Other Current Liabilities (RM)</label>
+        <input type="number" name="other_current_liabilities" class="form-input" step="0.01" min="0" placeholder="0.00"/>
+      </div>
+    </div>
+  </details>
 
   {% if prefill and prefill.transactions %}
     <div class="table-card" style="margin-top:1.2rem;">
@@ -175,4 +247,60 @@
   </div>
 
 </form>
+
+<style>
+  /* The browser draws the open dropdown list itself, usually on a white
+     background, so the dark theme's light text becomes unreadable there. */
+  #docTypeHint { color-scheme: light dark; }
+  #docTypeHint option,
+  #docTypeHint optgroup { background-color: #FFFFFF; color: #1F2937; }
+  #docTypeHint optgroup { font-weight: 700; }
+  #docTypeHint option:checked { background-color: #DBEAFE; color: #111827; }
+
+  /* No spinner arrows on amount boxes: they make it too easy to change a figure by accident. */
+  input[type=number] { -moz-appearance: textfield; appearance: textfield; }
+  input[type=number]::-webkit-outer-spin-button,
+  input[type=number]::-webkit-inner-spin-button { -webkit-appearance: none; margin: 0; }
+
+  .opt { font-weight: 400; color: var(--text-muted); font-size: 0.78rem; }
+  .bs-card > summary { cursor: pointer; list-style: none; display: flex; flex-direction: column; gap: 2px; }
+  .bs-card > summary::-webkit-details-marker { display: none; }
+  .bs-card > summary::before { content: "▸ "; }
+  .bs-card[open] > summary::before { content: "▾ "; }
+  .bs-hint { color: var(--text-muted); font-size: 0.8rem; }
+  .bs-grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 0 1.2rem; margin-top: 0.9rem; }
+  @media (max-width: 640px) { .bs-grid { grid-template-columns: 1fr; } }
+</style>
+<script>
+  (function () {
+    var sel = document.getElementById('docTypeHint');
+    var help = document.getElementById('docTypeHelp');
+    if (!sel || !help) return;
+    var text = {
+      '': 'Pick the one that matches, so the amount lands in the right box.',
+      'bill_received': 'Someone billed you. FinMan puts the total in the Expenses box and the supplier\u2019s name as the expense name.',
+      'receipt_issued': 'You billed a customer, or they paid you. FinMan puts the total in the Income box.',
+      'statement': 'FinMan reads total money in (credits) as Income and total money out (debits) as Expenses.'
+    };
+    sel.addEventListener('change', function () { help.textContent = text[sel.value] || text['']; });
+  })();
+
+  // Scrolling the mouse wheel over a focused amount box must scroll the page,
+  // not change the number. Dropping focus on wheel is the standard fix.
+  document.addEventListener('wheel', function (e) {
+    var t = document.activeElement;
+    if (t && t.type === 'number' && t === e.target) t.blur();
+  }, { passive: true });
+
+  // Typed categories: trim, and capitalise the first letter so "rent" and "Rent"
+  // end up as one category in the summaries.
+  ['category', 'expense_category'].forEach(function (name) {
+    var el = document.querySelector('input[name="' + name + '"]');
+    if (!el) return;
+    el.addEventListener('blur', function () {
+      var v = el.value.trim().replace(/\s+/g, ' ');
+      el.value = v ? v.charAt(0).toUpperCase() + v.slice(1) : '';
+    });
+  });
+</script>
 {% endblock %}

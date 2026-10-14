@@ -22,6 +22,10 @@
 
 {% block content %}
 
+{% macro num(v, f, suffix='') -%}
+{{ (f.format(v) ~ suffix) if v is not none else '—' }}
+{%- endmacro %}
+
 <div class="page-header">
   <h2 class="page-title">Dashboard Overview</h2>
 </div>
@@ -41,32 +45,42 @@
   <div class="kpi-card">
     <div class="kpi-label-row">
       <span class="kpi-label">Operating Cash Flow</span>
-      <span class="info-tooltip" tabindex="0">i<span class="tooltip-text">Cash generated from core business operations, estimated as 85% of net cash flow after excluding non-operating items.</span></span>
+      <span class="info-tooltip" tabindex="0">i<span class="tooltip-text">Cash generated from core business operations, net income plus non-cash expenses minus any change in working capital.</span></span>
     </div>
     <div class="kpi-value text-green">
       RM {{ '{:,.0f}'.format(summary.operating_cash_flow) }}
     </div>
-    <div class="kpi-sub">Core business cash flow</div>
+    <div class="kpi-sub">Net income + non-cash − ΔWC</div>
   </div>
   <div class="kpi-card">
     <div class="kpi-label-row">
       <span class="kpi-label">Current Ratio</span>
       <span class="info-tooltip" tabindex="0">i<span class="tooltip-text">Current assets divided by current liabilities. A ratio between 1.5 and 3.0 generally indicates healthy short-term financial stability.</span></span>
     </div>
-    <div class="kpi-value {{ 'text-green' if summary.current_ratio_ok else 'text-red' }}">
-      {{ summary.current_ratio }}
+    <div class="kpi-value {{ 'text-green' if summary.current_ratio_ok else ('text-red' if summary.current_ratio is not none else 'is-empty') }}">
+      {{ num(summary.current_ratio, '{:.2f}') }}
     </div>
-    <div class="kpi-sub">Target: 1.5 – 3.0</div>
+    <div class="kpi-sub">{{ "Target: 1.5 – 3.0" if summary.current_ratio is not none else "Needs cash and liabilities inputs" }}</div>
   </div>
   <div class="kpi-card">
     <div class="kpi-label-row">
       <span class="kpi-label">Days Sales Outstanding</span>
       <span class="info-tooltip" tabindex="0">i<span class="tooltip-text">Average number of days it takes to collect payment after a sale. Lower is better — under 45 days is considered healthy.</span></span>
     </div>
-    <div class="kpi-value {{ 'text-green' if summary.dso_ok else 'text-red' }}">
-      {{ summary.dso }} Days
+    <div class="kpi-value {{ 'text-green' if summary.dso_ok else 'text-red' if summary.efficiency_available else '' }}">
+      {% if summary.efficiency_available and summary.dso is not none %}
+        {{ summary.dso }} Days
+      {% else %}
+        —
+      {% endif %}
     </div>
-    <div class="kpi-sub">Target: under 45 days</div>
+    <div class="kpi-sub">
+      {% if summary.efficiency_available %}
+        Target: under 45 days
+      {% else %}
+        Enter income data to calculate
+      {% endif %}
+    </div>
   </div>
 </div>
 
@@ -95,28 +109,28 @@
       <span class="kpi-label">Quick Ratio</span>
       <span class="info-tooltip" tabindex="0">i<span class="tooltip-text">Like the current ratio, but excludes inventory — a stricter test of your ability to cover short-term liabilities with liquid assets.</span></span>
     </div>
-    <div class="kpi-value">{{ summary.quick_ratio }}</div>
+    <div class="kpi-value {{ '' if summary.quick_ratio is not none else 'is-empty' }}">{{ num(summary.quick_ratio, '{:.2f}') }}</div>
   </div>
   <div class="kpi-card">
     <div class="kpi-label-row">
       <span class="kpi-label">Working Capital</span>
       <span class="info-tooltip" tabindex="0">i<span class="tooltip-text">Current assets minus current liabilities. Measures your ability to cover short-term obligations.</span></span>
     </div>
-    <div class="kpi-value">RM {{ '{:,.0f}'.format(summary.working_capital) }}</div>
+    <div class="kpi-value {{ '' if summary.working_capital is not none else 'is-empty' }}">{{ num(summary.working_capital, 'RM {:,.0f}') }}</div>
   </div>
   <div class="kpi-card">
     <div class="kpi-label-row">
       <span class="kpi-label">AR Turnover</span>
       <span class="info-tooltip" tabindex="0">i<span class="tooltip-text">How many times per period you collect your average accounts receivable. Higher values indicate faster collection.</span></span>
     </div>
-    <div class="kpi-value">{{ summary.ar_turnover }}x</div>
+    <div class="kpi-value {{ '' if summary.ar_turnover is not none else 'is-empty' }}">{{ num(summary.ar_turnover, '{:.2f}', 'x') }}</div>
   </div>
   <div class="kpi-card">
     <div class="kpi-label-row">
       <span class="kpi-label">Cash Flow Quality</span>
       <span class="info-tooltip" tabindex="0">i<span class="tooltip-text">Ratio of operating cash flow to net income. A value near or above 1 suggests earnings are well-backed by actual cash rather than accounting adjustments.</span></span>
     </div>
-    <div class="kpi-value">{{ summary.cf_quality }}</div>
+    <div class="kpi-value {{ 'text-green' if summary.cf_quality_ok else ('text-red' if summary.cf_quality_warning else 'is-empty') }}">{{ num(summary.cf_quality, '{:.2f}', 'x') }}</div>
   </div>
 </div>
 

@@ -19,6 +19,10 @@
 
 {% block content %}
 
+{% macro stage_badge(stage) -%}
+<span class="badge {% if stage == 'Final Warning' %}badge-red{% elif stage == 'Firm Notice' %}badge-amber{% elif stage == 'Follow-up' %}badge-blue{% else %}badge-green{% endif %}">{{ stage }}</span>
+{%- endmacro %}
+
 <div class="page-header" style="justify-content:space-between;">
   <h2 class="page-title">Overdue Invoices</h2>
   <button onclick="window.print()" class="btn btn-outline">⬇ Export</button>
@@ -33,6 +37,7 @@
         <th>Amount (RM)</th>
         <th>Due Date</th>
         <th>Days Overdue</th>
+        <th>Reminders</th>
         <th>Actions</th>
       </tr>
     </thead>
@@ -53,11 +58,33 @@
             </span>
           </td>
           <td>
+            {% if inv.last_reminder_stage %}
+              {{ stage_badge(inv.last_reminder_stage) }}
+            {% else %}
+              <span style="color:var(--text-muted); font-size:0.8rem;">None sent</span>
+            {% endif %}
+            <div style="font-size:0.75rem; color:var(--text-muted); margin-top:3px;">
+              {% if inv.next_stage %}
+                Next: {{ inv.next_stage }}
+                {% if inv.next_in_days == 0 %}at the next daily run
+                {% else %}in {{ inv.next_in_days }} day{{ 's' if inv.next_in_days != 1 }}{% endif %}
+              {% else %}
+                Sequence complete
+              {% endif %}
+            </div>
+          </td>
+          <td>
             <div style="display:flex; gap:8px;">
-              <a href="{{ url_for('cfo_reminders') }}"
-                 class="btn btn-outline" style="font-size:0.78rem; padding:4px 10px;">
-                Remind
-              </a>
+              <form method="POST"
+                    action="{{ url_for('cfo_send_reminder', invoice_id=inv.id) }}"
+                    onsubmit="return confirm('Email the client a reminder for this invoice now?')"
+                    style="display:inline;">
+                <input type="hidden" name="csrf_token" value="{{ csrf_token() }}"/>
+                <button type="submit" class="btn btn-outline"
+                        style="font-size:0.78rem; padding:4px 10px;">
+                  Send now
+                </button>
+              </form>
               <form method="POST"
                     action="{{ url_for('cfo_mark_paid', invoice_id=inv.id) }}"
                     onsubmit="return confirm('Mark this invoice as paid?')"
@@ -75,7 +102,7 @@
         {% endfor %}
       {% else %}
         <tr>
-          <td colspan="6"
+          <td colspan="7"
               style="text-align:center; color:var(--text-muted); padding:2rem;">
             No overdue invoices. 🎉
           </td>

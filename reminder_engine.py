@@ -82,88 +82,145 @@ def _get_active_rules(db, cfo_uid):
     return sorted(rules, key=lambda r: r.get("days", 0))
 
 
-def run_reminder_check(db, cfo_uid, data_uid, issuer):
-    """The core automation. For every overdue invoice belonging to the
-    linked SME, find the most advanced rule stage it has now reached,
-    and if that stage hasn't already been sent, email it and log it.
+def _pick_rule(rules, days_overdue):
+    """Highest-day rule an invoice has reached, or None if it hasn't reached any."""
+    applicable = [r for r in rules if days_overdue >= r["days"]]
+    return max(applicable, key=lambda r: r["days"]) if applicable else None
 
-    Returns a dict summary: {"sent": int, "skipped": int, "errors": list}
-    """
-    from app import _get_receivables  # reuse the live overdue calculation
 
-    rules = _get_active_rules(db, cfo_uid)
-    if not rules:
-        rules = DEFAULT_RULES
+def _deliver(db, cfo_uid, data_uid, issuer, inv, rule):
+    """Email one reminder, then log it and mark the invoice.
+    Returns (status, detail): status is "sent", "not_configured" or "error"."""
+    inv_no       = inv.get("invoice_no", inv["id"])
+    client_email = inv.get("client_email", "")
+    if not client_email:
+        return "error", f"{inv_no}: no client email on file"
 
-    receivables = _get_receivables(data_uid)
-    overdue     = [i for i in receivables if i["days_overdue"] > 0]
-
-    sent, skipped, errors = 0, 0, []
-
-    for inv in overdue:
-        # Pick the highest-day rule this invoice now qualifies for
-        applicable = [r for r in rules if inv["days_overdue"] >= r["days"]]
-        if not applicable:
-            skipped += 1
-            continue
-        rule = max(applicable, key=lambda r: r["days"])
-
-        last_stage_days = inv.get("last_reminder_stage_days", -1)
-        if last_stage_days >= rule["days"]:
-            # Already reminded at this stage or a later one -- don't repeat
-            skipped += 1
-            continue
-
-        client_email = inv.get("client_email", "")
-        if not client_email:
-            skipped += 1
-            errors.append(f"{inv.get('invoice_no', inv['id'])}: no client email on file")
-            continue
-
+    try:
         body = rule["template"].format(
             name=inv.get("client_name", "there"),
-            inv_no=inv.get("invoice_no", inv["id"]),
+            inv_no=inv_no,
             amount=f"{inv['amount']:,.2f}",
             due_date=inv.get("due_date", ""),
             days_overdue=inv["days_overdue"],
         )
-        subject = f"{rule['stage']}: Invoice {inv.get('invoice_no', '')} overdue"
+    except (KeyError, IndexError, ValueError) as e:
+        return "error", f"{inv_no}: the '{rule['stage']}' template has a problem ({e})"
 
-        try:
-            _send_reminder_email(
-                to_email=client_email,
-                to_name=inv.get("client_name", ""),
-                subject=subject,
-                body=body,
-                from_email=issuer.get("email", ""),
-                from_name=issuer.get("company") or issuer.get("name", "FinMan"),
-            )
-            email_status = "sent"
-        except ReminderEmailNotConfigured:
-            # Still log it so the CFO can see what *would* have gone out --
-            # matches the same graceful-degradation pattern as invoice emails
-            email_status = "not_configured"
-        except Exception as e:
-            errors.append(f"{inv.get('invoice_no', inv['id'])}: {e}")
-            continue
+    subject = f"{rule['stage']}: Invoice {inv_no} overdue"
 
-        # Record the log entry regardless, so the history table is honest
-        # about what the system attempted
-        db.collection("users").document(cfo_uid).collection("reminderLogs").add({
-            "invoice_no":   inv.get("invoice_no", inv["id"]),
-            "recipient":    client_email,
-            "stage":        rule["stage"],
-            "sent_at":      datetime.now(timezone.utc).isoformat(),
-            "email_status": email_status,
-        })
+    try:
+        _send_reminder_email(
+            to_email=client_email,
+            to_name=inv.get("client_name", ""),
+            subject=subject,
+            body=body,
+            from_email=issuer.get("email", ""),
+            from_name=issuer.get("company") or issuer.get("name", "FinMan"),
+        )
+    except ReminderEmailNotConfigured:
+        # Nothing was sent, so don't log it or mark the invoice;
+        # this stage stays due until email is configured
+        return "not_configured", ""
+    except Exception as e:
+        return "error", f"{inv_no}: {e}"
 
-        # Mark the invoice itself so we never re-send this stage again
+    db.collection("users").document(cfo_uid).collection("reminderLogs").add({
+        "invoice_no":   inv_no,
+        "recipient":    client_email,
+        "stage":        rule["stage"],
+        "sent_at":      datetime.now(timezone.utc).isoformat(),
+        "email_status": "sent",
+    })
+
+    # Mark the invoice so the daily run never re-sends this stage. Never move
+    # the marker backwards (a manual send must not re-arm earlier stages).
+    if rule["days"] >= inv.get("last_reminder_stage_days", -1):
         db.collection("users").document(data_uid)\
           .collection("invoices").document(inv["id"]).update({
               "last_reminder_stage":      rule["stage"],
               "last_reminder_stage_days": rule["days"],
           })
 
-        sent += 1
+    return "sent", ""
+
+
+def run_reminder_check(db, cfo_uid, data_uid, issuer, receivables=None):
+    """The core automation. For every overdue invoice belonging to the
+    linked SME, find the most advanced rule stage it has now reached,
+    and if that stage hasn't already been sent, email it and log it.
+
+    Returns a dict summary: {"sent": int, "skipped": int, "errors": list}
+    """
+    rules = _get_active_rules(db, cfo_uid) or DEFAULT_RULES
+
+    if receivables is None:
+        from app import _get_receivables  # reuse the live overdue calculation
+        receivables = _get_receivables(data_uid)
+    overdue = [i for i in receivables if i["days_overdue"] > 0]
+
+    sent, skipped, pending, errors = 0, 0, 0, []
+
+    for inv in overdue:
+        rule = _pick_rule(rules, inv["days_overdue"])
+        if rule is None or inv.get("last_reminder_stage_days", -1) >= rule["days"]:
+            skipped += 1          # not due yet, or this stage already sent
+            continue
+
+        status, detail = _deliver(db, cfo_uid, data_uid, issuer, inv, rule)
+        if status == "sent":
+            sent += 1
+        elif status == "not_configured":
+            pending += 1
+        else:
+            errors.append(detail)
+
+    if pending:
+        errors.append(f"{pending} reminder(s) are due but email isn't configured "
+                      f"(set SENDGRID_API_KEY and SENDGRID_FROM_EMAIL in .env).")
 
     return {"sent": sent, "skipped": skipped, "errors": errors}
+
+
+def send_reminder_now(db, cfo_uid, data_uid, issuer, invoice_id, receivables):
+    """Manual 'Send now' for one invoice. Sends the stage the invoice has
+    currently reached, even if that stage was already sent automatically.
+    Returns (ok: bool, message: str) for flashing."""
+    inv = next((i for i in receivables
+                if i["id"] == invoice_id and i["days_overdue"] > 0), None)
+    if inv is None:
+        return False, "That invoice isn't overdue (or no longer exists)."
+
+    rules = _get_active_rules(db, cfo_uid) or DEFAULT_RULES
+    rule  = _pick_rule(rules, inv["days_overdue"]) or min(rules, key=lambda r: r["days"])
+
+    status, detail = _deliver(db, cfo_uid, data_uid, issuer, inv, rule)
+    if status == "sent":
+        return True, f"{rule['stage']} sent to {inv.get('client_email')}."
+    if status == "not_configured":
+        return False, ("Email isn't configured "
+                       "(set SENDGRID_API_KEY and SENDGRID_FROM_EMAIL in .env).")
+    return False, detail
+
+
+def annotate_invoices(db, cfo_uid, invoices):
+    """Adds reminder status to each overdue invoice for the Invoices page.
+    next_stage / next_in_days: the stage that will go out next and how many
+    days until then (0 = due at the next daily run, None = sequence complete)."""
+    rules = sorted(_get_active_rules(db, cfo_uid) or DEFAULT_RULES,
+                   key=lambda r: r["days"])
+    for inv in invoices:
+        last_days = inv.get("last_reminder_stage_days", -1)
+        overdue   = inv["days_overdue"]
+
+        due_now = [r for r in rules if last_days < r["days"] <= overdue]
+        if due_now:
+            nxt, wait = max(due_now, key=lambda r: r["days"]), 0
+        else:
+            later = [r for r in rules if r["days"] > max(last_days, overdue)]
+            nxt   = later[0] if later else None
+            wait  = (nxt["days"] - overdue) if nxt else None
+
+        inv["next_stage"]   = nxt["stage"] if nxt else None
+        inv["next_in_days"] = wait
+    return invoices

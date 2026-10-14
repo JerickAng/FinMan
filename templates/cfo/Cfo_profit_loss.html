@@ -1,0 +1,57 @@
+{% extends "base.html" %}
+{% block title %}Profit &amp; Loss{% endblock %}
+
+{% block sidebar %}
+  <a href="{{ url_for('cfo_dashboard') }}" class="nav-item">
+    <span class="nav-icon">▦</span> Dashboard
+  </a>
+  <a href="{{ url_for('cfo_projection') }}" class="nav-item">
+    <span class="nav-icon">📈</span> Projection
+  </a>
+  <a href="{{ url_for('cfo_profit_loss') }}"
+     class="nav-item {% if request.endpoint == 'cfo_profit_loss' %}active{% endif %}">
+    <span class="nav-icon">📄</span> Profit &amp; Loss
+  </a>
+  <a href="{{ url_for('cfo_invoices') }}" class="nav-item">
+    <span class="nav-icon">☰</span> Invoices
+  </a>
+  <a href="{{ url_for('cfo_reminders') }}" class="nav-item">
+    <span class="nav-icon">✉</span> Reminders
+  </a>
+{% endblock %}
+
+{% block content %}
+
+<div class="page-header no-print" style="justify-content:space-between;">
+  <h2 class="page-title">Profit &amp; Loss Statement</h2>
+  <button onclick="window.print()" class="btn btn-outline">⬇ Export / Print</button>
+</div>
+
+<!-- Period filter (screen only) -->
+<div class="form-card no-print" style="margin-bottom:1.4rem; max-width:none;">
+  <form method="GET" action="{{ url_for('cfo_profit_loss') }}"
+        style="display:flex; align-items:flex-end; gap:12px; flex-wrap:wrap;">
+    <div class="form-group" style="margin-bottom:0;">
+      <label>From</label>
+      <input type="month" name="start" class="form-input"
+             value="{{ pl.period_start or '' }}" style="max-width:160px;"/>
+    </div>
+    <div class="form-group" style="margin-bottom:0;">
+      <label>To</label>
+      <input type="month" name="end" class="form-input"
+             value="{{ pl.period_end or '' }}" style="max-width:160px;"/>
+    </div>
+    <button type="submit" class="btn btn-primary">Apply</button>
+    {% if pl.period_start or pl.period_end %}
+      <a href="{{ url_for('cfo_profit_loss') }}" class="btn btn-outline">Clear</a>
+    {% endif %}
+    <span style="font-size:0.8rem; color:var(--text-muted); margin-left:auto;">
+      {{ pl.record_count }} record{{ 's' if pl.record_count != 1 }}
+      {% if pl.period_start or pl.period_end %}in range{% endif %}
+    </span>
+  </form>
+</div>
+
+{% include "_pl_statement.html" %}
+
+{% endblock %}

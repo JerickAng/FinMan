@@ -11,9 +11,12 @@
   <a href="{{ url_for('sme_summary') }}" class="nav-item">
     <span class="nav-icon">▣</span> Summary
   </a>
-  <a href="{{ url_for('sme_report') }}"
+ <a href="{{ url_for('sme_report') }}"
      class="nav-item {% if request.endpoint == 'sme_report' %}active{% endif %}">
     <span class="nav-icon">☰</span> Report
+  </a>
+  <a href="{{ url_for('sme_profit_loss') }}" class="nav-item">
+    <span class="nav-icon">📄</span> Profit &amp; Loss
   </a>
   <a href="{{ url_for('sme_invoices') }}" class="nav-item">
     <span class="nav-icon">✉</span> Invoices
@@ -21,83 +24,155 @@
 {% endblock %}
 
 {% block content %}
-<div class="page-header" style="justify-content: space-between;">
+{% from "_report_kit.html" import styles, money, doc_header, sign_block, doc_footer %}
+{{ styles() }}
+
+<div class="page-header no-print" style="justify-content: space-between;">
   <h2 class="page-title">Financial Summary Report</h2>
   <button onclick="window.print()" class="btn btn-outline">⬇ Export / Print</button>
 </div>
 
-<div class="report-card" id="printable">
+<article class="doc" id="printable">
 
-  <div class="report-header">
-    <div class="report-title">Financial Summary Report</div>
-    <div class="report-sub">{{ user.company }} — Generated {{ now }}</div>
-    <hr class="report-divider"/>
+  {{ doc_header(user.company, user.company_reg, user.company_address,
+                'Financial Summary Report', 'As at ' ~ now) }}
+
+  <!-- Overview -->
+  <h2 class="sec">1. Overview</h2>
+  <p class="lead">
+    The business recorded a net cash {{ 'inflow' if summary.net_cf_positive else 'outflow' }}
+    of RM {{ money(summary.net_cash_flow|abs) }}.
+    Working capital stands at RM {{ money(summary.working_capital) }} and the current ratio is
+    {{ summary.current_ratio }}, which is {{ 'within' if summary.current_ratio_ok else 'outside' }}
+    the target range of 1.5 to 3.0.
+    {% if summary.efficiency_available %}
+      Customers take an average of {{ summary.dso }} days to pay, against a target of under 45 days.
+    {% endif %}
+  </p>
+  <dl class="key-figures">
+    <div><dt>Net cash flow</dt>
+         <dd class="{{ 'pos' if summary.net_cf_positive else 'neg' }}">{{ money(summary.net_cash_flow) }}</dd></div>
+    <div><dt>Operating cash flow</dt><dd>{{ money(summary.operating_cash_flow) }}</dd></div>
+    <div><dt>Working capital</dt><dd>{{ money(summary.working_capital) }}</dd></div>
+    <div><dt>Current ratio</dt>
+         <dd class="{{ 'pos' if summary.current_ratio_ok else 'neg' }}">{{ summary.current_ratio }}</dd></div>
+  </dl>
+
+  <!-- Cash flow -->
+  <h2 class="sec">2. Cash flow</h2>
+  <div class="tbl-wrap">
+  <table class="fs">
+    <thead>
+      <tr><th>Measure</th><th class="num">Amount (RM)</th><th>Basis</th></tr>
+    </thead>
+    <tbody>
+      <tr>
+        <td>Net cash flow</td>
+        <td class="num {{ 'pos' if summary.net_cf_positive else 'neg' }}">{{ money(summary.net_cash_flow) }}</td>
+        <td class="basis">Total income less total expenses</td>
+      </tr>
+      <tr>
+        <td>Operating cash flow</td>
+        <td class="num">{{ money(summary.operating_cash_flow) }}</td>
+        <td class="basis">Estimated (Note 1)</td>
+      </tr>
+      <tr>
+        <td>Free cash flow</td>
+        <td class="num">{{ money(summary.free_cash_flow) }}</td>
+        <td class="basis">Estimated (Note 2)</td>
+      </tr>
+      <tr>
+        <td>Cash flow quality</td>
+        <td class="num">{{ summary.cf_quality }}</td>
+        <td class="basis">Operating cash flow to net income (Note 3)</td>
+      </tr>
+    </tbody>
+  </table>
   </div>
 
-  <div class="report-grid">
-
-    <!-- Cash Flow -->
-    <div class="report-section">
-      <div class="report-section-title">Cash Flow</div>
-      <div class="report-row">
-        <span>Net Cash Flow</span>
-        <span class="{% if summary.net_cf_positive %}text-green{% else %}text-red{% endif %} bold">
-          RM {{ '{:,.2f}'.format(summary.net_cash_flow) }}
-        </span>
-      </div>
-      <div class="report-row">
-        <span>Operating Cash Flow</span>
-        <span class="bold">RM {{ '{:,.2f}'.format(summary.operating_cash_flow) }}</span>
-      </div>
-      <div class="report-row">
-        <span>Free Cash Flow</span>
-        <span class="bold">RM {{ '{:,.2f}'.format(summary.free_cash_flow) }}</span>
-      </div>
-    </div>
-
-    <!-- Liquidity -->
-    <div class="report-section">
-      <div class="report-section-title">Liquidity Ratios</div>
-      <div class="report-row">
-        <span>Current Ratio</span>
-        <span class="{% if summary.current_ratio_ok %}text-green{% else %}text-red{% endif %} bold">
-          {{ summary.current_ratio }}
-        </span>
-      </div>
-      <div class="report-row">
-        <span>Quick Ratio</span>
-        <span class="bold">{{ summary.quick_ratio }}</span>
-      </div>
-      <div class="report-row">
-        <span>Working Capital</span>
-        <span class="bold">RM {{ '{:,.2f}'.format(summary.working_capital) }}</span>
-      </div>
-    </div>
-
-    <!-- Efficiency -->
-    <div class="report-section">
-      <div class="report-section-title">Efficiency</div>
-      <div class="report-row">
-        <span>DSO</span>
-        <span class="{% if summary.dso_ok %}text-green{% else %}text-red{% endif %} bold">
-          {{ summary.dso }} Days
-        </span>
-      </div>
-      <div class="report-row">
-        <span>AR Turnover</span>
-        <span class="bold">{{ summary.ar_turnover }}x</span>
-      </div>
-      <div class="report-row">
-        <span>Cash Conversion Cycle</span>
-        <span class="bold">{{ summary.cash_conversion }} Days</span>
-      </div>
-    </div>
-
-  </div><!-- end report-grid -->
-
-  <div class="report-footer">
-    Generated by FinMan Financial Management System
+  <!-- Liquidity -->
+  <h2 class="sec">3. Liquidity</h2>
+  <div class="tbl-wrap">
+  <table class="fs">
+    <thead>
+      <tr><th>Measure</th><th class="num">Result</th><th>Target</th><th>Assessment</th></tr>
+    </thead>
+    <tbody>
+      <tr>
+        <td>Current ratio</td>
+        <td class="num">{{ summary.current_ratio }}</td>
+        <td class="basis">1.5 to 3.0</td>
+        <td class="{{ 'pos' if summary.current_ratio_ok else 'neg' }}">{{ 'Within target' if summary.current_ratio_ok else 'Outside target' }}</td>
+      </tr>
+      <tr>
+        <td>Quick ratio</td>
+        <td class="num">{{ summary.quick_ratio }}</td>
+        <td class="basis">—</td>
+        <td class="muted">—</td>
+      </tr>
+      <tr>
+        <td>Working capital (RM)</td>
+        <td class="num">{{ money(summary.working_capital) }}</td>
+        <td class="basis">—</td>
+        <td class="muted">—</td>
+      </tr>
+    </tbody>
+  </table>
   </div>
 
-</div>
+  <!-- Efficiency -->
+  <h2 class="sec">4. Collection efficiency</h2>
+  {% if summary.efficiency_available %}
+  <div class="tbl-wrap">
+  <table class="fs">
+    <thead>
+      <tr><th>Measure</th><th class="num">Result</th><th>Target</th><th>Assessment</th></tr>
+    </thead>
+    <tbody>
+      <tr>
+        <td>Days sales outstanding</td>
+        <td class="num">{{ summary.dso }} days</td>
+        <td class="basis">Under 45 days</td>
+        <td class="{{ 'pos' if summary.dso_ok else 'neg' }}">{{ 'Within target' if summary.dso_ok else 'Outside target' }}</td>
+      </tr>
+      <tr>
+        <td>Accounts receivable turnover</td>
+        <td class="num">{{ summary.ar_turnover }}x</td>
+        <td class="basis">—</td>
+        <td class="muted">—</td>
+      </tr>
+      <tr>
+        <td>Cash conversion cycle</td>
+        <td class="num">{{ summary.cash_conversion }} days</td>
+        <td class="basis">—</td>
+        <td class="muted">—</td>
+      </tr>
+    </tbody>
+  </table>
+  </div>
+  {% else %}
+  <p class="muted">Collection measures cannot be calculated yet. Enter income records to enable them.</p>
+  {% endif %}
+
+  <!-- Notes -->
+  <h2 class="sec">Notes</h2>
+  <ol class="notes">
+    <li><strong>Operating cash flow</strong> is estimated at 85% of net cash flow, after excluding non-operating items.</li>
+    <li><strong>Free cash flow</strong> is the cash remaining after operating expenses and estimated reinvestment costs.</li>
+    <li><strong>Cash flow quality</strong> is operating cash flow divided by net income. A value near or above 1 indicates earnings are backed by cash.</li>
+    <li><strong>Working capital</strong> is current assets less current liabilities. <strong>Current ratio</strong> is current assets divided by current liabilities. <strong>Quick ratio</strong> excludes inventory.</li>
+    <li><strong>Days sales outstanding</strong> is the average number of days taken to collect payment after a sale. <strong>Cash conversion cycle</strong> is the number of days between paying expenses and collecting cash from sales.</li>
+  </ol>
+
+  <div class="basis-box">
+    <strong>Basis of preparation.</strong>
+    This report is compiled from the financial records and invoices entered into FinMan.
+    It is an unaudited management report and does not replace statutory financial statements
+    prepared under the Companies Act 2016 and applicable Malaysian accounting standards.
+  </div>
+
+  {{ sign_block(user.name) }}
+  {{ doc_footer('Report date: ' ~ now) }}
+
+</article>
 {% endblock %}

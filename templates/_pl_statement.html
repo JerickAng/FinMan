@@ -1,0 +1,143 @@
+{% from "_report_kit.html" import styles, money, pct, month_label, doc_header, sign_block, doc_footer %}
+{{ styles() }}
+
+{# CFOs report on the SME they are linked to; SMEs report on themselves #}
+{% set entity = user.linked_sme_company or user.company %}
+{% set is_cfo = user.role == 'cfo' %}
+
+{% if pl.period_start and pl.period_end %}
+  {% set period_line = 'For the period ' ~ month_label(pl.period_start) ~ ' to ' ~ month_label(pl.period_end) %}
+{% elif pl.period_start %}
+  {% set period_line = 'For the period from ' ~ month_label(pl.period_start) %}
+{% elif pl.period_end %}
+  {% set period_line = 'For the period up to ' ~ month_label(pl.period_end) %}
+{% else %}
+  {% set period_line = 'For all recorded periods' %}
+{% endif %}
+
+<article class="doc" id="printable">
+
+  {{ doc_header(entity,
+                None if is_cfo else user.company_reg,
+                None if is_cfo else user.company_address,
+                'Statement of Profit or Loss',
+                period_line) }}
+
+  <!-- Face of the statement -->
+  <div class="tbl-wrap">
+  <table class="fs">
+    <thead>
+      <tr>
+        <th>&nbsp;</th>
+        <th class="num" style="width:4.5rem;">Note</th>
+        <th class="num">RM</th>
+      </tr>
+    </thead>
+    <tbody>
+      <tr>
+        <td>Revenue</td>
+        <td class="num muted">3</td>
+        <td class="num">{{ money(pl.total_revenue) }}</td>
+      </tr>
+      <tr>
+        <td>Total expenses</td>
+        <td class="num muted">4</td>
+        <td class="num">({{ money(pl.total_expenses) }})</td>
+      </tr>
+      <tr><td colspan="3" style="border:0; padding:.35rem 0;"></td></tr>
+      <tr class="grand">
+        <td>Net profit / (loss) for the period</td>
+        <td></td>
+        <td class="num {{ 'pos' if pl.net_profit_positive else 'neg' }}">{{ money(pl.net_profit) }}</td>
+      </tr>
+      <tr class="note-row">
+        <td colspan="3">Net profit margin: {{ pl.net_margin }}%, based on {{ pl.record_count }}
+          record{{ 's' if pl.record_count != 1 }} for the period stated above.</td>
+      </tr>
+    </tbody>
+  </table>
+  </div>
+
+  <p class="lead" style="margin-top:1.1rem; font-size:.82rem; color:var(--muted, #5B6472);">
+    The notes set out below form an integral part of, and should be read together with, this statement.
+  </p>
+
+  <!-- Notes to the financial statements -->
+  <h2 class="sec">Notes to the Statement of Profit or Loss</h2>
+
+  <p class="lead"><strong>1.&nbsp; Reporting entity and period.</strong>
+    This statement has been prepared for {{ entity or 'the entity' }}. {{ period_line }}.
+    All amounts are stated in Ringgit Malaysia (RM) unless otherwise indicated.</p>
+
+  <p class="lead"><strong>2.&nbsp; Basis of preparation.</strong>
+    This statement is compiled from the financial records entered into FinMan for the period shown.
+    It is an unaudited management statement, prepared on the basis of information provided by
+    management, and does not constitute statutory financial statements prepared under the
+    Companies Act 2016 and applicable Malaysian Financial Reporting Standards.</p>
+
+  <p class="lead"><strong>3.&nbsp; Revenue.</strong> Revenue for the period is analysed by category as follows.</p>
+  <div class="tbl-wrap">
+  <table class="fs">
+    <thead>
+      <tr><th>Category</th><th class="num">RM</th><th class="num">% of revenue</th></tr>
+    </thead>
+    <tbody>
+      {% for cat, amount in pl.revenue_by_category %}
+      <tr>
+        <td class="indent">{{ cat }}</td>
+        <td class="num">{{ money(amount) }}</td>
+        <td class="num muted">{{ pct(amount, pl.total_revenue) }}</td>
+      </tr>
+      {% else %}
+      <tr><td class="indent muted" colspan="3">No revenue recorded for this period.</td></tr>
+      {% endfor %}
+      <tr class="subtotal">
+        <td>Total revenue</td>
+        <td class="num">{{ money(pl.total_revenue) }}</td>
+        <td class="num">{{ '100.0%' if pl.total_revenue else '—' }}</td>
+      </tr>
+    </tbody>
+  </table>
+  </div>
+
+  <p class="lead" style="margin-top:1.3rem;"><strong>4.&nbsp; Expenses.</strong> Expenses for the period are analysed by category as follows.</p>
+  <div class="tbl-wrap">
+  <table class="fs">
+    <thead>
+      <tr><th>Category</th><th class="num">RM</th><th class="num">% of revenue</th></tr>
+    </thead>
+    <tbody>
+      {% for cat, amount in pl.expense_by_category %}
+      <tr>
+        <td class="indent">{{ cat }}</td>
+        <td class="num">{{ money(amount) }}</td>
+        <td class="num muted">{{ pct(amount, pl.total_revenue) }}</td>
+      </tr>
+      {% else %}
+      <tr><td class="indent muted" colspan="3">No expenses recorded for this period.</td></tr>
+      {% endfor %}
+      <tr class="subtotal">
+        <td>Total expenses</td>
+        <td class="num">{{ money(pl.total_expenses) }}</td>
+        <td class="num">{{ pct(pl.total_expenses, pl.total_revenue) }}</td>
+      </tr>
+    </tbody>
+  </table>
+  </div>
+
+  <p class="lead" style="margin-top:1.3rem;"><strong>5.&nbsp; Rounding.</strong>
+    Amounts are stated to the nearest sen. Figures shown in brackets represent expenses
+    or a net loss for the period.</p>
+
+  {{ sign_block(user.name) }}
+  {{ doc_footer(('Generated on <span data-gen-date></span>')|safe) }}
+
+</article>
+
+<script>
+  (function () {
+    // Stamp the generation date (browser's local date)
+    var g = document.querySelector('#printable [data-gen-date]');
+    if (g) g.textContent = new Date().toLocaleDateString('en-GB', { day: 'numeric', month: 'long', year: 'numeric' });
+  })();
+</script>

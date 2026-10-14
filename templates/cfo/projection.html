@@ -37,6 +37,13 @@
   </p>
 </div>
 
+<div id="methodPanel" class="chart-card" style="margin-bottom:1.4rem; display:none;"></div>
+
+<div id="extraPanels" style="display:grid; grid-template-columns:1fr 1fr; gap:1.4rem; margin-bottom:1.4rem;">
+  <div id="backtestPanel" class="chart-card" style="display:none;"></div>
+  <div id="receivablesPanel" class="chart-card" style="display:none;"></div>
+</div>
+
 <!-- Projection table -->
 <div class="table-card">
   <div style="padding: 1rem 1.2rem; border-bottom: 1px solid var(--border);">
@@ -45,7 +52,7 @@
   <table>
     <thead>
       <tr>
-        <th>Date</th>
+        <th>Month</th>
         <th>Projected Net Cash Flow (RM)</th>
         <th>Upper Bound (RM)</th>
         <th>Lower Bound (RM)</th>
@@ -90,50 +97,45 @@
       document.getElementById("chartMsg").style.display = "none";
       renderChart(data.actual, data.projected);
       renderTable(data.projected);
+      renderPanels(data);
 
     } catch (err) {
       document.getElementById("chartMsg").textContent = "Failed to load forecast.";
     }
   }
 
+  const rm = v => "RM " + Number(v).toLocaleString(undefined, {maximumFractionDigits: 0});
+
   function renderChart(actual, projected) {
-    const labels   = [...actual.map(d => d.date), ...projected.map(d => d.date)];
-    const actVals  = [...actual.map(d => d.value), ...projected.map(() => null)];
-    const projVals = [...actual.map(() => null),   ...projected.map(d => d.value)];
+    const labels = [...actual.map(d => d.date), ...projected.map(d => d.date)];
+    const pad    = n => Array(n).fill(null);
+    const lastA  = actual[actual.length - 1].value;
+
+    // projected line starts at the last actual point so the lines join
+    const proj  = [...pad(actual.length - 1), lastA, ...projected.map(d => d.value)];
+    const upper = [...pad(actual.length - 1), lastA, ...projected.map(d => d.upper)];
+    const lower = [...pad(actual.length - 1), lastA, ...projected.map(d => d.lower)];
+    const act   = [...actual.map(d => d.value), ...pad(projected.length)];
 
     if (chart) chart.destroy();
-
     chart = new Chart(document.getElementById("projectionChart"), {
       type: "line",
-      data: {
-        labels,
-        datasets: [
-          {
-            label: "Actual Cash Flow",
-            data: actVals,
-            borderColor: "#2563EB",
-            backgroundColor: "rgba(37,99,235,0.1)",
-            tension: 0.4, fill: true,
-            pointRadius: 4,
-          },
-          {
-            label: "Projected Cash Flow",
-            data: projVals,
-            borderColor: "#D97706",
-            borderDash: [6, 3],
-            backgroundColor: "rgba(217,119,6,0.08)",
-            tension: 0.4, fill: true,
-            pointRadius: 3,
-          }
-        ]
-      },
+      data: { labels, datasets: [
+        { label: "Actual (monthly net cash flow)", data: act, borderColor: "#2563EB",
+          backgroundColor: "rgba(37,99,235,0.1)", tension: 0.3, pointRadius: 4 },
+        { label: "Projected", data: proj, borderColor: "#D97706", borderDash: [6,3],
+          tension: 0.3, pointRadius: 4 },
+        { label: "Upper (80%)", data: upper, borderColor: "rgba(217,119,6,0.4)",
+          borderDash: [2,3], pointRadius: 0, fill: "+1", backgroundColor: "rgba(217,119,6,0.10)" },
+        { label: "Lower (80%)", data: lower, borderColor: "rgba(217,119,6,0.4)",
+          borderDash: [2,3], pointRadius: 0 },
+      ]},
       options: {
-        plugins: { legend: { labels: { color: "#F1F5F9" } } },
+        plugins: { legend: { labels: { color: "#F1F5F9",
+                   filter: i => !i.text.startsWith("Lower") } } },
         scales: {
-          x: { ticks: { color:"#94A3B8", maxTicksLimit:8 },
-               grid:  { color:"rgba(255,255,255,0.05)" } },
-          y: { ticks: { color:"#94A3B8" },
-               grid:  { color:"rgba(255,255,255,0.05)" } }
+          x: { ticks: { color:"#94A3B8" }, grid: { color:"rgba(255,255,255,0.05)" } },
+          y: { ticks: { color:"#94A3B8" }, grid: { color:"rgba(255,255,255,0.05)" } }
         }
       }
     });
@@ -142,22 +144,75 @@
   function renderTable(projected) {
     const tbody = document.getElementById("projectionTable");
     if (!projected.length) {
-      tbody.innerHTML = `<tr><td colspan="4"
-        style="text-align:center;color:var(--text-muted);padding:1.5rem;">
-        No projection data available.</td></tr>`;
+      tbody.innerHTML = `<tr><td colspan="4" style="text-align:center;color:var(--text-muted);padding:1.5rem;">No projection data available.</td></tr>`;
       return;
     }
     tbody.innerHTML = projected.map(d => `
       <tr>
         <td>${d.date}</td>
-        <td class="${d.value >= 0 ? 'text-green' : 'text-red'} bold">
-          RM ${d.value.toLocaleString()}</td>
-        <td>RM ${(d.upper||0).toLocaleString()}</td>
-        <td>RM ${(d.lower||0).toLocaleString()}</td>
+        <td class="${d.value >= 0 ? 'text-green' : 'text-red'} bold">${rm(d.value)}</td>
+        <td>${rm(d.upper)}</td>
+        <td>${rm(d.lower)}</td>
       </tr>`).join("");
   }
 
-  // Auto-load 30 day forecast on page load
+  function show(id, html) {
+    const el = document.getElementById(id);
+    el.innerHTML = html;
+    el.style.display = html ? "block" : "none";
+  }
+
+  function renderPanels(d) {
+    // method + notes
+    const notes = (d.notes || []).map(n => `<li>${n}</li>`).join("");
+    show("methodPanel", `
+      <div class="chart-title">How this projection was made</div>
+      <p style="font-size:.85rem;margin:.3rem 0;">Method: <strong>${d.method_label}</strong>
+        &middot; ${d.months_of_data} months of history &middot; ${d.interval} interval.
+        Total projected net cash flow for the period: <strong class="${d.total_projected >= 0 ? 'text-green' : 'text-red'}">${rm(d.total_projected)}</strong>.</p>
+      <p style="font-size:.8rem;color:var(--text-muted);margin:.3rem 0;">This is a statistical projection from past
+        monthly patterns. It does not know about future events such as new contracts or one-off costs.</p>
+      ${notes ? `<ul style="font-size:.8rem;color:var(--text-muted);margin:.4rem 0 0 1.1rem;">${notes}</ul>` : ""}`);
+
+    // back-test
+    const bt = d.backtest;
+    if (bt) {
+      const m = bt.model, b = bt.baseline;
+      const fmt = x => x.wape === null ? rm(x.mae) : `${rm(x.mae)} (${x.wape}% off)`;
+      show("backtestPanel", `
+        <div class="chart-title">Accuracy check</div>
+        <p style="font-size:.8rem;color:var(--text-muted);margin:.2rem 0 .6rem;">The last ${bt.months_held_out}
+          month(s) were hidden, forecast, then compared with what really happened.</p>
+        <table><tbody>
+          <tr><td>${d.method_label}</td><td style="text-align:right;">avg error ${fmt(m)}</td></tr>
+          <tr><td>Simple 3-month average</td><td style="text-align:right;">avg error ${fmt(b)}</td></tr>
+        </tbody></table>
+        <p style="font-size:.82rem;margin:.6rem 0 0;" class="${bt.beats_baseline ? 'text-green' : 'text-red'}">
+          ${bt.beats_baseline ? "The model beat the simple average." : "The simple average did as well or better, so treat this projection with extra caution."}</p>`);
+    } else {
+      show("backtestPanel", `
+        <div class="chart-title">Accuracy check</div>
+        <p style="font-size:.82rem;color:var(--text-muted);">Needs at least 6 months of history to test the forecast against past data.</p>`);
+    }
+
+    // receivables
+    const rd = d.receivables_due;
+    if (rd) {
+      const rows = rd.by_month.map(r => `<tr><td>${r.date}</td><td style="text-align:right;">${rm(r.amount)} (${r.count} inv.)</td></tr>`).join("");
+      show("receivablesPanel", `
+        <div class="chart-title">Unpaid invoices due</div>
+        <p style="font-size:.8rem;color:var(--text-muted);margin:.2rem 0 .6rem;">Money you are already owed. Shown for
+          context; not added to the projection, to avoid counting it twice.</p>
+        <table><tbody>
+          <tr><td>Already overdue / earlier</td><td style="text-align:right;">${rm(rd.earlier)}</td></tr>
+          ${rows}
+        </tbody></table>`);
+    } else {
+      show("receivablesPanel", "");
+    }
+  }
+
+  // Auto-load 60 day forecast on page load
   loadForecast(60);
 </script>
 {% endblock %}

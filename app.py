@@ -1,4 +1,4 @@
-from flask import Flask, render_template, request, redirect, url_for, session, flash, jsonify
+from flask import Flask, render_template, request, redirect, url_for, session, flash, jsonify, make_response
 import firebase_admin
 from firebase_admin import credentials, auth, firestore, storage
 from functools import wraps
@@ -28,7 +28,8 @@ app.config.update(
 )
 
 SESSION_COOKIE_NAME = "finman_session"
-SESSION_EXPIRY      = timedelta(days=5)
+SESSION_EXPIRY      = timedelta(hours=8)    # absolute cap on one login
+IDLE_TIMEOUT        = timedelta(minutes=10) # logged out after this much inactivity
 
 # ── Firebase Admin SDK ────────────────────────────────────────────────────────
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))
@@ -61,6 +62,16 @@ def _load_user(uid):
         "linked_sme_uid":  data.get("linked_sme_uid", ""),
         "linked_sme_company": data.get("linked_sme_company", ""),
     }
+
+def _touch_activity():
+    """Record 'now' in Flask's signed session so the client cannot forge it."""
+    session["last_active"] = datetime.utcnow().timestamp()
+
+def _is_idle_expired():
+    last = session.get("last_active")
+    if last is None:
+        return True   # signed-in cookie but no activity stamp: make them log in again
+    return datetime.utcnow().timestamp() - last > IDLE_TIMEOUT.total_seconds()
 
 def _clear_session_cookie(resp):
     resp.delete_cookie(SESSION_COOKIE_NAME)
@@ -154,11 +165,24 @@ def login_required(f):
                 auth.RevokedSessionCookieError, ValueError):
             flash("Your session has expired. Please log in again.", "warning")
             return _clear_session_cookie(redirect(url_for("login")))
+        if _is_idle_expired():
+            # Revoke on the Firebase side too, so a copied cookie dies with it.
+            try:
+                auth.revoke_refresh_tokens(decoded["uid"])
+            except Exception:
+                pass
+            session.clear()
+            if request.path.startswith("/api/"):
+                return _clear_session_cookie(
+                    make_response(jsonify({"error": "idle_timeout"}), 401))
+            flash("Your session expired due to inactivity. Please log in again to continue.", "warning")
+            return _clear_session_cookie(redirect(url_for("login")))
         user = _load_user(decoded["uid"])
         if user is None:
             flash("Account not found or suspended.", "danger")
             return _clear_session_cookie(redirect(url_for("login")))
         session["user"] = user
+        _touch_activity()
         return f(*args, **kwargs)
     return decorated
 
@@ -197,6 +221,7 @@ def login():
                 return redirect(url_for("login"))
             session_cookie = auth.create_session_cookie(id_token, expires_in=SESSION_EXPIRY)
             resp           = redirect(url_for("dashboard"))
+            _touch_activity()
             resp.set_cookie(
                 SESSION_COOKIE_NAME, session_cookie,
                 max_age=int(SESSION_EXPIRY.total_seconds()),
@@ -208,11 +233,43 @@ def login():
             return redirect(url_for("login"))
     return render_template("login.html")
 
+@app.route("/api/keepalive", methods=["POST"])
+@login_required
+def keepalive():
+    """Called by static/js/idle_timeout.js when the user is genuinely active
+    (typing, clicking) without loading a new page. CSRF-protected."""
+    _touch_activity()
+    return jsonify({"ok": True})
+
 @app.route("/logout", methods=["POST"])
 def logout():
+    idle = request.args.get("reason") == "idle"
+    uid = session.get("user", {}).get("uid")
     session.clear()
-    flash("You have been logged out.", "info")
+    if idle:
+        # logged out by the inactivity timer in idle_timeout.js
+        if uid:
+            try:
+                auth.revoke_refresh_tokens(uid)
+            except Exception:
+                pass
+        flash("Your session expired due to inactivity. Please log in again to continue.", "warning")
+    else:
+        flash("You have been logged out.", "info")
     return _clear_session_cookie(redirect(url_for("login")))
+
+@app.route("/reset-password")
+def reset_password():
+    """Landing page for the Firebase password-reset email link. Public (the
+    user is logged out) and GET-only: the password change itself happens
+    client-side against Firebase using the one-time code in the link, so
+    there is nothing here for CSRF to protect. The code is in the URL, so the
+    page must not be cached or leak a Referer."""
+    resp = make_response(render_template("reset_password.html"))
+    resp.headers["Cache-Control"] = "no-store"
+    resp.headers["Referrer-Policy"] = "no-referrer"
+    return resp
+
 
 @app.route("/dashboard")
 @login_required
@@ -257,28 +314,48 @@ def sme_dashboard():
                            records=records, outstanding_invoices=outstanding_invoices,
                            monthly=monthly)
 
+BALANCE_FIELDS = ("cash", "inventory", "accounts_payable", "other_current_liabilities")
+
+def _opt_float(name):
+    v = (request.form.get(name) or "").strip()
+    return float(v) if v else None
+
+def _get_balance_inputs(records):
+    """Latest entered value per balance-sheet field, by reporting period."""
+    out = {}
+    for r in sorted(records, key=lambda r: r.get("period") or ""):
+        for k in BALANCE_FIELDS:
+            if r.get(k) is not None:
+                out[k] = r[k]
+    return out
+
+
 @app.route("/sme/data-entry", methods=["GET", "POST"])
 @login_required
 @role_required("sme")
 def sme_data_entry():
     uid = session["user"]["uid"]
     if request.method == "POST":
-        income   = float(request.form.get("income",   0) or 0)
+        income = float(request.form.get("income", 0) or 0)
         expenses = float(request.form.get("expenses", 0) or 0)
+        balance = {k: _opt_float(k) for k in BALANCE_FIELDS}
+        has_balance = any(v is not None for v in balance.values())
 
-        if income == 0 and expenses == 0:
-            flash("Please enter at least an income or expense amount before saving.", "warning")
+        if income == 0 and expenses == 0 and not has_balance:
+            flash("Please enter at least an income, expense or balance amount before saving.", "warning")
             return render_template("sme/data_entry.html", user=session["user"])
 
         record = {
-            "income":        income,
-            "expenses":      expenses,
-            "source":        request.form.get("source",        ""),
-            "category":      request.form.get("category",      ""),
-            "expense_name":  request.form.get("expense_name",  ""),
-            "period":        request.form.get("period",        ""),
-            "status":        "saved",
+            "income": income,
+            "expenses": expenses,
+            "source": request.form.get("source", ""),
+            "category": request.form.get("category", ""),
+            "expense_name": request.form.get("expense_name", ""),
+            "expense_category": request.form.get("expense_category", ""),
+            "period": request.form.get("period", ""),
+            "status": "saved",
             "source_document_url": request.form.get("source_document_url", "") or None,
+            **balance,
         }
         db.collection("users").document(uid).collection("financialRecords").add(record)
 
@@ -291,7 +368,7 @@ def sme_data_entry():
 @login_required
 @role_required("sme")
 def sme_upload_document():
-    from document_parser import allowed_file, extract_text, parse_financial_data, MAX_FILE_SIZE_BYTES
+    from document_parser import allowed_file, parse_document, MAX_FILE_SIZE_BYTES
     from werkzeug.utils import secure_filename
     import tempfile
 
@@ -326,16 +403,8 @@ def sme_upload_document():
         tmp_path = tmp.name
 
     try:
-        text   = extract_text(tmp_path)
-        parsed = parse_financial_data(text, doc_type_hint=doc_type_hint)
+        parsed = parse_document(tmp_path, doc_type_hint=doc_type_hint)
 
-        if not text.strip():
-            flash("Couldn't read any text from that file — it may be a low-quality scan. "
-                  "You can still fill the form in manually below.", "warning")
-
-        # Best-effort: keep the original document in Firebase Storage as an
-        # audit trail. If this fails for any reason, extraction still
-        # succeeded, so don't block the user over a storage hiccup.
         source_document_url = None
         try:
             storage_path = f"users/{uid}/documents/{datetime.utcnow().strftime('%Y%m%d%H%M%S')}_{filename}"
@@ -365,7 +434,7 @@ def sme_summary():
     total_invoices   = _get_outstanding_invoices_total(uid)
     overdue_invoices = _get_overdue_invoices(uid)
     overdue_total    = sum(i["amount"] for i in overdue_invoices)
-    summary = compute_summary(records, total_invoices=total_invoices)
+    summary = compute_summary(records, total_invoices=total_invoices,balance_inputs=_get_balance_inputs(records))
     return render_template("sme/summary.html", user=session["user"],
                            summary=summary,
                            overdue_invoices=overdue_invoices,
@@ -382,9 +451,25 @@ def sme_report():
                db.collection("users").document(uid)
                  .collection("financialRecords").stream()]
     total_invoices = _get_outstanding_invoices_total(uid)
-    summary = compute_summary(records, total_invoices=total_invoices)
+    summary = compute_summary(records, total_invoices=total_invoices,
+                              balance_inputs=_get_balance_inputs(records))
     return render_template("sme/report.html", user=session["user"],
                            summary=summary, now=datetime.today().strftime("%d %B %Y"))
+
+
+@app.route("/sme/profit-loss")
+@login_required
+@role_required("sme")
+def sme_profit_loss():
+    from calculations import compute_profit_loss
+    uid     = session["user"]["uid"]
+    records = [r.to_dict() for r in
+               db.collection("users").document(uid)
+                 .collection("financialRecords").stream()]
+    period_start = request.args.get("start", "").strip()
+    period_end   = request.args.get("end", "").strip()
+    pl = compute_profit_loss(records, period_start or None, period_end or None)
+    return render_template("sme/profit_loss.html", user=session["user"], pl=pl)
 
 
 @app.route("/sme/invoices")
@@ -607,7 +692,9 @@ def cfo_dashboard():
                     db.collection("users").document(data_uid)
                       .collection("financialRecords").stream()]
     invoices     = _get_overdue_invoices(data_uid)
-    summary      = compute_summary(records, total_invoices=_get_outstanding_invoices_total(data_uid))
+    summary = compute_summary(records,
+                              total_invoices=_get_outstanding_invoices_total(data_uid),
+                              balance_inputs=_get_balance_inputs(records))
     monthly      = compute_monthly_series(records)
     linked_co    = session["user"].get("linked_sme_company", "")
     return render_template("cfo/dashboard.html", user=session["user"],
@@ -620,13 +707,29 @@ def cfo_dashboard():
 def cfo_projection():
     return render_template("cfo/projection.html", user=session["user"])
 
+@app.route("/cfo/profit-loss")
+@login_required
+@role_required("cfo")
+def cfo_profit_loss():
+    from calculations import compute_profit_loss
+    uid      = session["user"]["uid"]
+    data_uid = _get_data_uid(uid)
+    records  = [r.to_dict() for r in
+                db.collection("users").document(data_uid)
+                  .collection("financialRecords").stream()]
+    period_start = request.args.get("start", "").strip()
+    period_end   = request.args.get("end", "").strip()
+    pl = compute_profit_loss(records, period_start or None, period_end or None)
+    return render_template("cfo/profit_loss.html", user=session["user"], pl=pl)
+
 @app.route("/cfo/invoices")
 @login_required
 @role_required("cfo")
 def cfo_invoices():
     uid      = session["user"]["uid"]
     data_uid = _get_data_uid(uid)
-    invoices = _get_overdue_invoices(data_uid)
+    from reminder_engine import annotate_invoices
+    invoices = annotate_invoices(db, uid, _get_overdue_invoices(data_uid))
     return render_template("cfo/invoices.html", user=session["user"], invoices=invoices)
 
 @app.route("/cfo/reminders")
@@ -821,7 +924,8 @@ def api_forecast():
                 db.collection("users").document(data_uid)
                   .collection("financialRecords").stream()]
     horizon  = int(request.args.get("days", 30))
-    return get_forecast(records, horizon)
+    invoices = _get_receivables(data_uid)   # unpaid invoices, for the known-receivables panel
+    return get_forecast(records, horizon, invoices)
 
 @csrf.exempt   # called by JS fetch() — CSRF token sent via X-CSRFToken header
 @app.route("/api/save-reminder-rule", methods=["POST"])
@@ -838,5 +942,50 @@ def api_save_reminder_rule():
     return jsonify({"status": "ok"})
 
 
+@app.route("/cfo/send-reminder/<invoice_id>", methods=["POST"])
+@login_required
+@role_required("cfo")
+def cfo_send_reminder(invoice_id):
+    from reminder_engine import send_reminder_now
+    uid      = session["user"]["uid"]
+    data_uid = _get_data_uid(uid)
+    ok, msg  = send_reminder_now(db, cfo_uid=uid, data_uid=data_uid,
+                                 issuer=session["user"], invoice_id=invoice_id,
+                                 receivables=_get_receivables(data_uid))
+    flash(msg, "success" if ok else "warning")
+    return redirect(url_for("cfo_invoices"))
+
+
+def run_all_reminder_checks():
+    """Daily job: run the reminder check for every active CFO."""
+    from reminder_engine import run_reminder_check
+    try:
+        for cfo_doc in db.collection("users").where("role", "==", "cfo").stream():
+            issuer = _load_user(cfo_doc.id)
+            if not issuer:                      # suspended or deleted
+                continue
+            data_uid = issuer.get("linked_sme_uid") or cfo_doc.id
+            result = run_reminder_check(db, cfo_uid=cfo_doc.id, data_uid=data_uid,
+                                        issuer=issuer,
+                                        receivables=_get_receivables(data_uid))
+            print(f"[reminders] {issuer['email']}: sent={result['sent']} "
+                  f"skipped={result['skipped']} errors={result['errors']}")
+    except Exception as e:
+        print(f"[reminders] scheduled run failed: {e}")
+
+
+def start_reminder_scheduler():
+    from apscheduler.schedulers.background import BackgroundScheduler
+    scheduler = BackgroundScheduler(timezone="Asia/Kuala_Lumpur")
+    scheduler.add_job(run_all_reminder_checks, "cron", hour=9, minute=0,
+                      id="daily_reminders", replace_existing=True)
+    scheduler.start()
+
+
 if __name__ == "__main__":
-    app.run(debug=not IS_PRODUCTION)
+    debug = not IS_PRODUCTION
+    # The debug reloader starts two processes; only start the scheduler in
+    # the one that serves requests, or every job would run twice.
+    if not debug or os.environ.get("WERKZEUG_RUN_MAIN") == "true":
+        start_reminder_scheduler()
+    app.run(debug=debug)
