@@ -18,195 +18,302 @@
 {% endblock %}
 
 {% block content %}
+<style>
+  .rm-stats{display:grid;grid-template-columns:repeat(4,1fr);gap:.8rem;margin-bottom:1.2rem}
+  .rm-stat{background:var(--card-bg,#fff);border:1px solid var(--border);border-radius:10px;padding:.8rem 1rem}
+  .rm-stat b{display:block;font-size:1.35rem;line-height:1.2}
+  .rm-stat span{font-size:.78rem;color:var(--text-muted)}
+  .rm-stat.hot{border-color:var(--amber,#e0a030);background:rgba(224,160,48,.08)}
+
+  .rm-layout{display:grid;grid-template-columns:1.7fr 1fr;gap:1.2rem;align-items:start}
+  @media(max-width:1000px){.rm-layout,.rm-stats{grid-template-columns:1fr 1fr}.rm-layout{grid-template-columns:1fr}}
+
+  .rm-panel{background:var(--card-bg,#fff);border:1px solid var(--border);border-radius:10px;overflow:hidden}
+  .rm-panel-h{display:flex;align-items:center;justify-content:space-between;gap:.6rem;
+              padding:.75rem 1rem;border-bottom:1px solid var(--border);flex-wrap:wrap}
+  .rm-chips{display:flex;gap:.35rem}
+  .rm-chip{border:1px solid var(--border);background:none;border-radius:999px;padding:.2rem .7rem;
+           font-size:.78rem;cursor:pointer;color:inherit}
+  .rm-chip.on{background:var(--text,#222);color:#fff;border-color:var(--text,#222)}
+
+  .rm-item{display:grid;grid-template-columns:1fr auto;gap:.5rem 1rem;padding:.85rem 1rem;
+           border-bottom:1px solid var(--border)}
+  .rm-item:last-child{border-bottom:0}
+  .rm-client{font-weight:600}
+  .rm-meta{font-size:.8rem;color:var(--text-muted);margin-top:.15rem}
+  .rm-status{font-size:.8rem;margin-top:.45rem}
+  .rm-status.ready{color:#b5760b;font-weight:600}
+  .rm-actions{display:flex;gap:.4rem;align-items:center;align-self:center}
+  .rm-link{background:none;border:0;cursor:pointer;font-size:.8rem;color:var(--text-muted);padding:.3rem}
+  .rm-link:hover{text-decoration:underline}
+
+  .rm-ladder{display:flex;gap:4px;margin-top:.5rem}
+  .rm-step{font-size:.68rem;padding:.12rem .5rem;border-radius:999px;border:1px solid var(--border);color:var(--text-muted)}
+  .rm-step.sent{background:rgba(40,160,90,.14);border-color:transparent;color:#1d7a46}
+  .rm-step.ready{background:rgba(224,160,48,.18);border-color:#e0a030;color:#8a5a06;font-weight:600}
+
+  .rm-empty{padding:2.2rem 1rem;text-align:center;color:var(--text-muted)}
+  .rm-empty big{display:block;font-size:1.6rem;margin-bottom:.3rem}
+
+  .rm-rule{display:flex;align-items:center;gap:.7rem;padding:.6rem 1rem;border-bottom:1px solid var(--border)}
+  .rm-rule .d{min-width:3.2rem;font-size:.8rem;color:var(--text-muted)}
+  .rm-rule .t{flex:1;font-size:.78rem;color:var(--text-muted);white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+
+  .rm-log{padding:.5rem 1rem;border-bottom:1px solid var(--border);font-size:.8rem;display:flex;justify-content:space-between;gap:.6rem}
+  .rm-log:last-child{border-bottom:0}
+
+  .rm-token{font-size:.72rem;border:1px dashed var(--border);background:none;border-radius:6px;
+            padding:.1rem .4rem;cursor:pointer;margin:0 .2rem .3rem 0;color:inherit}
+  .rm-preview{background:rgba(0,0,0,.04);border-radius:8px;padding:.7rem .8rem;font-size:.84rem;
+              white-space:pre-wrap;line-height:1.5}
+
+  dialog.rm-dlg{border:1px solid var(--border);border-radius:12px;padding:0;width:min(520px,92vw)}
+  dialog.rm-dlg::backdrop{background:rgba(0,0,0,.35)}
+  .rm-dlg .in{padding:1.2rem}
+  details.rm-add summary{cursor:pointer;padding:.7rem 1rem;font-size:.85rem;font-weight:600;list-style:none}
+  details.rm-add summary::-webkit-details-marker{display:none}
+</style>
 
 <div class="page-header" style="justify-content:space-between;">
-  <h2 class="page-title">Configure Debtor Reminders</h2>
+  <h2 class="page-title">Debtor Reminders</h2>
   <form method="POST" action="{{ url_for('cfo_run_reminders') }}"
-        onsubmit="return confirm('Check all overdue invoices and send any reminders that are due now?')">
+        onsubmit="return confirm('Send every reminder that is due right now?')">
     <input type="hidden" name="csrf_token" value="{{ csrf_token() }}"/>
-    <button type="submit" class="btn btn-primary">
-      ▶ Run Reminder Check Now
+    <button type="submit" class="btn btn-primary" {% if not stats.ready %}disabled style="opacity:.5"{% endif %}>
+      Send all due ({{ stats.ready }})
     </button>
   </form>
 </div>
 
-<div style="display:grid; grid-template-columns:1fr 1.4fr; gap:1.4rem;">
-
-  <!-- Rule builder -->
-  <div class="form-card">
-    <div class="section-title" style="margin-bottom:1.2rem;">Configure reminder rule</div>
-
-    <div class="form-group">
-      <label>Days overdue trigger</label>
-      <select id="ruleDays" class="form-input">
-        <option value="1">1 day</option>
-        <option value="7" selected>7 days</option>
-        <option value="14">14 days</option>
-        <option value="21">21 days</option>
-      </select>
-    </div>
-
-    <div class="form-group">
-      <label>Reminder stage</label>
-      <select id="ruleStage" class="form-input">
-        <option value="Gentle Reminder">Gentle Reminder</option>
-        <option value="Follow-up" selected>Follow-up</option>
-        <option value="Firm Notice">Firm Notice</option>
-        <option value="Final Warning">Final Warning</option>
-      </select>
-    </div>
-
-    <div class="form-group">
-      <label>Email template</label>
-      <textarea id="ruleTemplate" class="form-input"
-                rows="4" style="resize:vertical;"
-                placeholder="Hi {name}, we noticed invoice {inv_no} for RM {amount} is now overdue..."></textarea>
-    </div>
-
-    <button onclick="saveRule()" class="btn btn-primary btn-block" style="margin-top:0.5rem;">
-      Save Rule
-    </button>
-    <p id="ruleMsg" style="font-size:0.82rem; margin-top:0.5rem; display:none;"></p>
-  </div>
-
-  <!-- Active rules + history -->
-  <div>
-    <div class="table-card" style="margin-bottom:1.4rem;">
-      <div style="padding:0.8rem 1.2rem; border-bottom:1px solid var(--border);">
-        <strong>Reminder Rules</strong>
-        <span style="color:var(--text-muted); font-size:0.78rem;">
-          — applied in order of days overdue; each invoice gets the most
-          advanced stage it currently qualifies for
-        </span>
-      </div>
-      <table>
-        <thead>
-          <tr><th>Days Overdue</th><th>Stage</th><th>Action</th></tr>
-        </thead>
-        <tbody>
-          {% if rules %}
-            {% for rule in rules %}
-            <tr>
-              <td>{{ rule.days }} day{{ 's' if rule.days != 1 }}</td>
-              <td>
-                <span class="badge
-                  {% if rule.stage == 'Final Warning' %}badge-red
-                  {% elif rule.stage == 'Firm Notice' %}badge-amber
-                  {% elif rule.stage == 'Follow-up' %}badge-blue
-                  {% else %}badge-green{% endif %}">
-                  {{ rule.stage }}
-                </span>
-              </td>
-              <td>
-                <form method="POST"
-                      action="{{ url_for('cfo_delete_rule', rule_id=rule.id) }}"
-                      onsubmit="return confirm('Delete this rule?')"
-                      style="display:inline;">
-                  <input type="hidden" name="csrf_token" value="{{ csrf_token() }}"/>
-                  <button type="submit" class="action-link red"
-                          style="background:none;border:none;cursor:pointer;">
-                    Delete
-                  </button>
-                </form>
-              </td>
-            </tr>
-            {% endfor %}
-          {% else %}
-            <tr>
-              <td colspan="3" style="text-align:center; color:var(--text-muted); padding:1.5rem;">
-                No rules configured.
-              </td>
-            </tr>
-          {% endif %}
-        </tbody>
-      </table>
-    </div>
-
-    <!-- History log -->
-    <div class="table-card">
-      <div style="padding:0.8rem 1.2rem; border-bottom:1px solid var(--border);">
-        <strong>Reminder History Log</strong>
-      </div>
-      <table>
-        <thead>
-          <tr><th>Invoice</th><th>Recipient</th><th>Sent</th><th>Stage</th><th>Email</th></tr>
-        </thead>
-        <tbody>
-          {% if logs %}
-            {% for log in logs %}
-            <tr>
-              <td>{{ log.invoice_no or '—' }}</td>
-              <td>{{ log.recipient or '—' }}</td>
-              <td>{{ log.sent_at[:16].replace('T', ' ') if log.sent_at else '—' }}</td>
-              <td>
-                <span class="badge
-                  {% if log.stage == 'Final Warning' %}badge-red
-                  {% elif log.stage == 'Firm Notice' %}badge-amber
-                  {% elif log.stage == 'Follow-up' %}badge-blue
-                  {% else %}badge-green{% endif %}">
-                  {{ log.stage }}
-                </span>
-              </td>
-              <td>
-                {% if log.email_status == 'sent' %}
-                  <span class="badge badge-green">Sent</span>
-                {% else %}
-                  <span class="badge badge-amber" title="SendGrid not configured">Not sent</span>
-                {% endif %}
-              </td>
-            </tr>
-            {% endfor %}
-          {% else %}
-            <tr>
-              <td colspan="5"
-                  style="text-align:center; color:var(--text-muted); padding:1.5rem;">
-                No reminders sent yet. Click "Run Reminder Check Now" above.
-              </td>
-            </tr>
-          {% endif %}
-        </tbody>
-      </table>
-    </div>
-  </div>
-
+<!-- At-a-glance -->
+<div class="rm-stats">
+  <div class="rm-stat {% if stats.ready %}hot{% endif %}"><b>{{ stats.ready }}</b><span>ready to send</span></div>
+  <div class="rm-stat"><b>{{ stats.waiting }}</b><span>waiting for next stage</span></div>
+  <div class="rm-stat"><b>RM {{ '{:,.0f}'.format(stats.overdue) }}</b><span>total overdue</span></div>
+  <div class="rm-stat"><b>{{ stats.sent_7d }}</b><span>sent this week</span></div>
 </div>
 
+<div class="rm-layout">
+
+  <!-- LEFT: the worklist -->
+  <div class="rm-panel">
+    <div class="rm-panel-h">
+      <strong>Who to chase</strong>
+      <div class="rm-chips">
+        <button class="rm-chip on" data-f="all">All ({{ queue|length }})</button>
+        <button class="rm-chip" data-f="ready">Ready ({{ stats.ready }})</button>
+        <button class="rm-chip" data-f="waiting">Waiting ({{ stats.waiting }})</button>
+      </div>
+    </div>
+
+    {% for inv in queue %}
+    <div class="rm-item" data-state="{{ 'ready' if inv.ready else 'waiting' }}">
+      <div>
+        <div class="rm-client">{{ inv.client_name or 'Unknown client' }}
+          <span style="font-weight:400;color:var(--text-muted)">· {{ inv.invoice_no or inv.id }}</span>
+        </div>
+        <div class="rm-meta">
+          RM {{ '{:,.2f}'.format(inv.amount) }} · {{ inv.days_overdue }} day{{ 's' if inv.days_overdue != 1 }} overdue
+          {% if not inv.has_email %}· <span style="color:var(--red)">no email on file</span>{% endif %}
+        </div>
+
+        <div class="rm-ladder" aria-label="Reminder progress">
+          {% for s in inv.ladder %}
+            <span class="rm-step {{ s.state }}" title="{{ s.stage }} · {{ s.days }}d">{{ s.stage }}</span>
+          {% endfor %}
+        </div>
+
+        <div class="rm-status {{ 'ready' if inv.ready }}">
+          {% if inv.ready %}
+            {{ inv.next_stage }} is due now
+          {% elif inv.next_stage %}
+            Next: {{ inv.next_stage }} in {{ inv.next_in_days }} day{{ 's' if inv.next_in_days != 1 }}
+          {% else %}
+            All stages sent — consider a call
+          {% endif %}
+        </div>
+      </div>
+
+      <div class="rm-actions">
+        <button type="button" class="btn {{ 'btn-primary' if inv.ready else '' }}"
+                {% if not inv.has_email %}disabled title="Add a client email first"{% endif %}
+                onclick='openSend({{ {"id": inv.id, "client": inv.client_name or "", "email": inv.client_email or "", "stage": inv.send_stage, "text": inv.preview} | tojson }})'>
+          {{ 'Review & send' if inv.ready else 'Send now' }}
+        </button>
+        <form method="POST" action="{{ url_for('cfo_mark_paid', invoice_id=inv.id) }}"
+              onsubmit="return confirm('Mark this invoice as paid?')">
+          <input type="hidden" name="csrf_token" value="{{ csrf_token() }}"/>
+          <input type="hidden" name="next" value="{{ url_for('cfo_reminders') }}"/>
+          <button class="rm-link" type="submit">Paid ✓</button>
+        </form>
+      </div>
+    </div>
+    {% else %}
+    <div class="rm-empty"><big>🎉</big>No overdue invoices. Nobody to chase right now.</div>
+    {% endfor %}
+    <div class="rm-empty" id="rmNone" style="display:none">Nothing in this view.</div>
+  </div>
+
+  <!-- RIGHT: how it escalates + activity -->
+  <div style="display:grid;gap:1.2rem;">
+
+    <div class="rm-panel">
+      <div class="rm-panel-h"><strong>Escalation steps</strong>
+        <span style="font-size:.75rem;color:var(--text-muted)">checked daily at 9:00</span></div>
+
+      {% for rule in rules %}
+      <div class="rm-rule">
+        <span class="d">Day {{ rule.days }}</span>
+        <span class="badge
+          {% if rule.stage == 'Final Warning' %}badge-red
+          {% elif rule.stage == 'Firm Notice' %}badge-amber
+          {% elif rule.stage == 'Follow-up' %}badge-blue
+          {% else %}badge-green{% endif %}">{{ rule.stage }}</span>
+        <span class="t" title="{{ rule.template }}">{{ rule.template }}</span>
+        <form method="POST" action="{{ url_for('cfo_delete_rule', rule_id=rule.id) }}"
+              onsubmit="return confirm('Delete this step?')">
+          <input type="hidden" name="csrf_token" value="{{ csrf_token() }}"/>
+          <button class="rm-link" type="submit" aria-label="Delete step">✕</button>
+        </form>
+      </div>
+      {% else %}
+      <div class="rm-empty">No steps yet. Add one below.</div>
+      {% endfor %}
+
+      <details class="rm-add">
+        <summary>＋ Add a step</summary>
+        <div style="padding:0 1rem 1rem;">
+          <div style="display:grid;grid-template-columns:1fr 1.4fr;gap:.6rem;">
+            <div class="form-group">
+              <label>After (days overdue)</label>
+              <input id="ruleDays" type="number" min="1" max="120" value="30" class="form-input"/>
+            </div>
+            <div class="form-group">
+              <label>Tone</label>
+              <select id="ruleStage" class="form-input">
+                <option>Gentle Reminder</option><option>Follow-up</option>
+                <option>Firm Notice</option><option>Final Warning</option>
+              </select>
+            </div>
+          </div>
+          <div class="form-group">
+            <label>Message <span style="font-weight:400;color:var(--text-muted)">(tap to insert)</span></label>
+            <div>
+              <button type="button" class="rm-token" data-t="{name}">name</button>
+              <button type="button" class="rm-token" data-t="{inv_no}">invoice no.</button>
+              <button type="button" class="rm-token" data-t="{amount}">amount</button>
+              <button type="button" class="rm-token" data-t="{due_date}">due date</button>
+              <button type="button" class="rm-token" data-t="{days_overdue}">days overdue</button>
+            </div>
+            <textarea id="ruleTemplate" class="form-input" rows="3" style="resize:vertical;"
+              placeholder="Hi {name}, invoice {inv_no} for RM {amount} is now {days_overdue} days overdue..."></textarea>
+          </div>
+          <div class="rm-preview" id="rulePreview" style="margin-bottom:.7rem;">Preview appears as you type.</div>
+          <button onclick="saveRule()" class="btn btn-primary btn-block">Save step</button>
+          <p id="ruleMsg" style="font-size:.82rem;margin-top:.5rem;display:none;"></p>
+        </div>
+      </details>
+    </div>
+
+    <div class="rm-panel">
+      <div class="rm-panel-h"><strong>Recent activity</strong></div>
+      {% for log in logs[:6] %}
+      <div class="rm-log">
+        <span><b>{{ log.invoice_no or '—' }}</b> · {{ log.stage }}<br>
+          <span style="color:var(--text-muted)">{{ log.recipient or '—' }}</span></span>
+        <span style="color:var(--text-muted);white-space:nowrap">
+          {{ log.sent_at[5:16].replace('T', ' ') if log.sent_at else '—' }}</span>
+      </div>
+      {% else %}
+      <div class="rm-empty">Nothing sent yet.</div>
+      {% endfor %}
+    </div>
+
+  </div>
+</div>
+
+<!-- Review & send -->
+<dialog class="rm-dlg" id="sendDlg">
+  <form method="POST" id="sendForm" class="in">
+    <input type="hidden" name="csrf_token" value="{{ csrf_token() }}"/>
+    <input type="hidden" name="next" value="{{ url_for('cfo_reminders') }}"/>
+    <h3 style="margin:0 0 .2rem;" id="dlgTitle"></h3>
+    <p style="margin:0 0 .8rem;font-size:.82rem;color:var(--text-muted)" id="dlgTo"></p>
+    <div class="rm-preview" id="dlgText"></div>
+    <div style="display:flex;gap:.5rem;justify-content:flex-end;margin-top:1rem;">
+      <button type="button" class="btn" onclick="sendDlg.close()">Cancel</button>
+      <button type="submit" class="btn btn-primary">Send email</button>
+    </div>
+  </form>
+</dialog>
 {% endblock %}
 
 {% block scripts %}
 <script>
-  async function saveRule() {
-    const days     = document.getElementById("ruleDays").value;
-    const stage    = document.getElementById("ruleStage").value;
-    const template = document.getElementById("ruleTemplate").value;
-    const msg      = document.getElementById("ruleMsg");
+  /* ---- worklist filter ---- */
+  document.querySelectorAll('.rm-chip').forEach(c => c.onclick = () => {
+    document.querySelectorAll('.rm-chip').forEach(x => x.classList.toggle('on', x === c));
+    let shown = 0;
+    document.querySelectorAll('.rm-item').forEach(r => {
+      const ok = c.dataset.f === 'all' || r.dataset.state === c.dataset.f;
+      r.style.display = ok ? '' : 'none';
+      if (ok) shown++;
+    });
+    document.getElementById('rmNone').style.display = shown ? 'none' : '';
+  });
 
-    if (!template.trim()) {
-      msg.style.display = "block";
-      msg.style.color   = "var(--red)";
-      msg.textContent   = "Please enter an email template.";
-      return;
-    }
+  /* ---- review & send dialog ---- */
+  const sendDlg = document.getElementById('sendDlg');
+  function openSend(d) {
+    document.getElementById('dlgTitle').textContent = d.stage + ' to ' + (d.client || 'client');
+    document.getElementById('dlgTo').textContent    = 'To: ' + d.email;
+    document.getElementById('dlgText').textContent  = d.text;
+    document.getElementById('sendForm').action = '/cfo/send-reminder/' + encodeURIComponent(d.id);
+    sendDlg.showModal();
+  }
+
+  /* ---- new step: tokens + live preview ---- */
+  const tpl = document.getElementById('ruleTemplate');
+  const SAMPLE = {name:'Aisha', inv_no:'INV-0042', amount:'2,500.00',
+                  due_date:'2025-01-15', days_overdue:document.getElementById('ruleDays').value};
+  function renderPreview() {
+    SAMPLE.days_overdue = document.getElementById('ruleDays').value;
+    const out = tpl.value.replace(/\{(\w+)\}/g, (m, k) => k in SAMPLE ? SAMPLE[k] : '⚠' + m);
+    document.getElementById('rulePreview').textContent = tpl.value.trim() ? out : 'Preview appears as you type.';
+  }
+  tpl.addEventListener('input', renderPreview);
+  document.getElementById('ruleDays').addEventListener('input', renderPreview);
+  document.querySelectorAll('.rm-token').forEach(b => b.onclick = () => {
+    const s = tpl.selectionStart ?? tpl.value.length;
+    tpl.value = tpl.value.slice(0, s) + b.dataset.t + tpl.value.slice(tpl.selectionEnd ?? s);
+    tpl.focus(); tpl.selectionStart = tpl.selectionEnd = s + b.dataset.t.length;
+    renderPreview();
+  });
+
+  async function saveRule() {
+    const days     = document.getElementById('ruleDays').value;
+    const stage    = document.getElementById('ruleStage').value;
+    const template = tpl.value;
+    const msg      = document.getElementById('ruleMsg');
+    msg.style.display = 'block';
+
+    const bad = (template.match(/\{(\w+)\}/g) || []).filter(t => !(t.slice(1, -1) in SAMPLE));
+    if (!template.trim())      { msg.style.color = 'var(--red)'; msg.textContent = 'Please write a message.'; return; }
+    if (bad.length)            { msg.style.color = 'var(--red)'; msg.textContent = 'Unknown placeholder: ' + bad.join(', '); return; }
+    if (!(parseInt(days) > 0)) { msg.style.color = 'var(--red)'; msg.textContent = 'Days must be 1 or more.'; return; }
 
     const csrfToken = document.querySelector('meta[name="csrf-token"]').content;
-    const res = await fetch("/api/save-reminder-rule", {
-      method:  "POST",
-      headers: {
-        "Content-Type": "application/json",
-        "X-CSRFToken":  csrfToken,
-      },
-      body: JSON.stringify({ days, stage, template }),
-    });
-
-    const data = await res.json();
-    msg.style.display = "block";
-    if (data.status === "ok") {
-      msg.style.color = "var(--green)";
-      msg.textContent = "Rule saved. Reload to see it in the list.";
-    } else {
-      msg.style.color = "var(--red)";
-      msg.textContent = "Failed to save rule.";
-    }
+    try {
+      const res = await fetch('/api/save-reminder-rule', {
+        method: 'POST',
+        headers: {'Content-Type': 'application/json', 'X-CSRFToken': csrfToken},
+        body: JSON.stringify({days, stage, template}),
+      });
+      const data = await res.json();
+      if (data.status === 'ok') { location.reload(); return; }
+    } catch (e) {}
+    msg.style.color = 'var(--red)';
+    msg.textContent = 'Failed to save step.';
   }
 </script>
 {% endblock %}

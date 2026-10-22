@@ -1,29 +1,3 @@
-"""
-calculations.py
-All financial calculation logic for FinMan.
-
-Formulas follow Chapter 2 (Tables 2.2 - 2.5):
-  Cash flow & health : OCF, FCF, Net Cash Flow
-  Liquidity          : Working Capital, Current, Quick, Cash ratio
-  Efficiency         : DSO, AR Turnover, Inventory Turnover, AP Turnover, CCC
-  Cash flow quality  : CFO/Net Income, CFO/Current Liabilities,
-                       CFO/Total Debt, CFO/Capex
-
-Design rule: a metric is NEVER fabricated. If an input it needs is missing,
-the metric is returned as None (templates should render None as "—") and the
-matching *_available flag is False.
-
-Income/expenses come from financialRecords (cash-basis). Balance-sheet style
-inputs (cash, inventory, payables ...) are supplied by the caller through
-`balance_inputs`, a dict with any of these optional keys:
-    cash, inventory, accounts_payable, other_current_liabilities,
-    total_debt, capex, cogs, purchases, non_cash_expenses,
-    change_in_working_capital
-Values not supplied fall back to figures derivable from records
-(expense_category "Depreciation"/"Amortization" -> non-cash,
- "COGS" -> cogs, "Capex" -> capex) or stay None.
-"""
-
 NON_CASH_CATEGORIES = {"depreciation", "amortization", "amortisation"}
 DAYS_PER_PERIOD = 30
 
@@ -37,7 +11,6 @@ def _f(v):
 
 
 def _num(v):
-    """Return float, or None when the input is missing/blank."""
     if v is None or v == "":
         return None
     try:

@@ -1,5 +1,5 @@
 {% extends "base.html" %}
-{% block title %}Overdue Invoices{% endblock %}
+{% block title %}Invoices{% endblock %}
 
 {% block sidebar %}
   <a href="{{ url_for('cfo_dashboard') }}" class="nav-item">
@@ -23,12 +23,16 @@
 <span class="badge {% if stage == 'Final Warning' %}badge-red{% elif stage == 'Firm Notice' %}badge-amber{% elif stage == 'Follow-up' %}badge-blue{% else %}badge-green{% endif %}">{{ stage }}</span>
 {%- endmacro %}
 
-<div class="page-header" style="justify-content:space-between;">
-  <h2 class="page-title">Overdue Invoices</h2>
+<div class="page-header" style="justify-space-between;">
+  <h2 class="page-title">Invoices Overview</h2>
   <button onclick="window.print()" class="btn btn-outline">⬇ Export</button>
 </div>
 
-<div class="table-card">
+<!-- 1. OVERDUE INVOICES SECTION -->
+<div class="table-card" style="margin-bottom: 2rem;">
+  <div style="padding: 1rem 1.2rem; border-bottom: 1px solid var(--border);">
+    <strong style="color: var(--red, #EF4444);">Overdue Invoices Requiring Action</strong>
+  </div>
   <table>
     <thead>
       <tr>
@@ -105,6 +109,73 @@
           <td colspan="7"
               style="text-align:center; color:var(--text-muted); padding:2rem;">
             No overdue invoices. 🎉
+          </td>
+        </tr>
+      {% endif %}
+    </tbody>
+  </table>
+</div>
+
+<!-- 2. ALL BILLED INVOICES SECTION -->
+<div class="table-card">
+  <div style="padding: 1rem 1.2rem; border-bottom: 1px solid var(--border);">
+    <strong>All Billed Invoices History</strong>
+  </div>
+  <table>
+    <thead>
+      <tr>
+        <th>Invoice No.</th>
+        <th>Client Name</th>
+        <th>Client Email</th>
+        <th>Amount (RM)</th>
+        <th>Issue Date</th>
+        <th>Due Date</th>
+        <th>Status</th>
+        <th>Actions</th>
+      </tr>
+    </thead>
+    <tbody>
+      {% if all_invoices %}
+        {% for inv in all_invoices %}
+        <tr>
+          <td><strong>{{ inv.invoice_no or '—' }}</strong></td>
+          <td>{{ inv.client_name or '—' }}</td>
+          <td>{{ inv.client_email or '—' }}</td>
+          <td>RM {{ '{:,.2f}'.format(inv.amount|float) }}</td>
+          <td>{{ inv.issue_date or '—' }}</td>
+          <td>{{ inv.due_date or '—' }}</td>
+          <td>
+            {% if inv.status == 'paid' %}
+              <span class="badge badge-green">Paid</span>
+            {% elif inv.status == 'overdue' %}
+              <span class="badge badge-red">Overdue ({{ inv.days_overdue }}d)</span>
+            {% else %}
+              <span class="badge badge-amber">Unpaid</span>
+            {% endif %}
+          </td>
+          <td>
+            {% if inv.status != 'paid' %}
+              <form method="POST"
+                    action="{{ url_for('cfo_mark_paid', invoice_id=inv.id) }}"
+                    onsubmit="return confirm('Mark this invoice as paid?')"
+                    style="display:inline;">
+                <input type="hidden" name="csrf_token" value="{{ csrf_token() }}"/>
+                <button type="submit" class="btn btn-outline"
+                        style="font-size:0.78rem; padding:4px 10px;
+                               color:var(--green); border-color:var(--green);">
+                  Mark Paid
+                </button>
+              </form>
+            {% else %}
+              <span style="color:var(--text-muted); font-size:0.8rem;">Completed</span>
+            {% endif %}
+          </td>
+        </tr>
+        {% endfor %}
+      {% else %}
+        <tr>
+          <td colspan="8" style="text-align:center; color:var(--text-muted); padding:2rem;">
+            No billed invoices found.
           </td>
         </tr>
       {% endif %}

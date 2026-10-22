@@ -3,16 +3,21 @@ import firebase_admin
 from firebase_admin import credentials, auth, firestore, storage
 from functools import wraps
 from dotenv import load_dotenv
-from datetime import timedelta, datetime
+from datetime import timedelta, datetime, timezone
 from flask_wtf.csrf import CSRFProtect
+import threading
+import time
 import os
 import re
 from billplz_gateway import verify_callback_signature, BillplzNotConfigured
 
+# ── Global Thread Lock ────────────────────────────────────────────────────────
+invoice_lock = threading.Lock()
+
 load_dotenv()
 
 app = Flask(__name__)
-app.secret_key = os.getenv("SECRET_KEY", "finman-secret-change-this")
+app.secret_key = os.environ["SECRET_KEY"]
 
 # CSRF protection — every POST requires a valid token
 csrf = CSRFProtect(app)
@@ -78,9 +83,6 @@ def _clear_session_cookie(resp):
     return resp
 
 # ── Password policy ───────────────────────────────────────────────────────────
-# Minimum 8 characters, at least one uppercase, one lowercase, one special
-# character. Enforced here (server-side) since this is the only place that
-# actually matters -- any client-side check is just a UX nicety on top.
 _PASSWORD_RULES = [
     (lambda p: len(p) >= 8,                         "at least 8 characters"),
     (lambda p: re.search(r"[A-Z]", p) is not None,  "one uppercase letter"),
@@ -89,13 +91,10 @@ _PASSWORD_RULES = [
 ]
 
 def validate_password(password):
-    """Returns a list of unmet requirements (empty list = password is valid)."""
     return [msg for check, msg in _PASSWORD_RULES if not check(password)]
 
 
 def _get_data_uid(uid):
-    """Returns the UID whose Firestore data the current user should read.
-       For CFOs this is the linked SME; for everyone else it's their own."""
     user_doc = db.collection("users").document(uid).get()
     if user_doc.exists:
         linked = user_doc.to_dict().get("linked_sme_uid", "")
@@ -105,24 +104,12 @@ def _get_data_uid(uid):
 
 
 def _get_outstanding_invoices_total(data_uid):
-    """Sums invoices that aren't marked paid -- the real accounts-receivable
-    figure, sourced from the dedicated invoices collection rather than
-    financial records (which no longer carry invoice amounts)."""
     invoices = [i.to_dict() for i in
                 db.collection("users").document(data_uid).collection("invoices").stream()]
     return sum((i.get("total") or i.get("amount") or 0)
               for i in invoices if i.get("status") != "paid")
 
 def _get_receivables(data_uid):
-    """The single source of truth for 'is this invoice overdue'.
-
-    Invoices are created with status='unpaid' and nothing ever flips that
-    to 'overdue' -- there's no background job for it. So instead of
-    trusting a stored status field, we compute days_overdue live from
-    due_date every time this is called. Returns every not-paid invoice
-    with a real, current days_overdue value attached; the caller decides
-    whether >0 counts as 'overdue' for its purposes.
-    """
     from datetime import date
     today = date.today()
     docs = db.collection("users").document(data_uid)\
@@ -144,8 +131,14 @@ def _get_receivables(data_uid):
         invoices.append(inv)
     return invoices
 
+def _safe_next(default_endpoint):
+    """Redirect target from a posted 'next' field - local paths only."""
+    nxt = request.form.get("next", "")
+    if nxt.startswith("/") and not nxt.startswith("//"):
+        return nxt
+    return url_for(default_endpoint)
+
 def _get_overdue_invoices(data_uid):
-    """Invoices past their due date, most overdue first."""
     receivables = _get_receivables(data_uid)
     overdue = [i for i in receivables if i["days_overdue"] > 0]
     return sorted(overdue, key=lambda i: i["days_overdue"], reverse=True)
@@ -260,11 +253,6 @@ def logout():
 
 @app.route("/reset-password")
 def reset_password():
-    """Landing page for the Firebase password-reset email link. Public (the
-    user is logged out) and GET-only: the password change itself happens
-    client-side against Firebase using the one-time code in the link, so
-    there is nothing here for CSRF to protect. The code is in the URL, so the
-    page must not be cached or leak a Referer."""
     resp = make_response(render_template("reset_password.html"))
     resp.headers["Cache-Control"] = "no-store"
     resp.headers["Referrer-Policy"] = "no-referrer"
@@ -493,118 +481,155 @@ def sme_invoice_create():
     import tempfile
 
     uid = session["user"]["uid"]
-    client_name  = request.form.get("client_name", "").strip()
-    client_email = request.form.get("client_email", "").strip()
-    due_date     = request.form.get("due_date", "").strip()
-    notes        = request.form.get("notes", "").strip()
 
-    descriptions = request.form.getlist("item_description")
-    qtys         = request.form.getlist("item_qty")
-    prices       = request.form.getlist("item_unit_price")
-
-    if not client_name or not client_email:
-        flash("Client name and email are required.", "danger")
+    # ── Thread Safety Lock ──────────────────────────────────────────────────
+    # Attempts to acquire the global lock without waiting. If another request
+    # (from a double/triple click) is already executing, this returns False immediately.
+    acquired = invoice_lock.acquire(blocking=False)
+    if not acquired:
+        flash("Invoice creation is already processing. Please wait a moment.", "warning")
         return redirect(url_for("sme_invoices"))
 
-    line_items = []
-    for desc, qty, price in zip(descriptions, qtys, prices):
-        desc = desc.strip()
-        if not desc:
-            continue
-        try:
-            qty_f, price_f = float(qty or 0), float(price or 0)
-        except ValueError:
-            continue
-        if qty_f <= 0 or price_f < 0:
-            continue
-        line_items.append({"description": desc, "qty": qty_f, "unit_price": price_f})
-
-    if not line_items:
-        flash("Please add at least one valid line item.", "danger")
-        return redirect(url_for("sme_invoices"))
-
-    total = round(sum(i["qty"] * i["unit_price"] for i in line_items), 2)
-    issue_date = datetime.utcnow().strftime("%Y-%m-%d")
-
-    # Sequential-looking invoice number scoped to this account
-    existing_count = len(list(db.collection("users").document(uid).collection("invoices").stream()))
-    invoice_no = f"INV-{uid[:4].upper()}-{existing_count + 1:04d}"
-
-    invoice_record = {
-        "invoice_no":   invoice_no,
-        "client_name":  client_name,
-        "client_email": client_email,
-        "issue_date":   issue_date,
-        "due_date":     due_date,
-        "line_items":   line_items,
-        "total":        total,
-        "amount":       total,  # kept for compatibility with existing CFO views
-        "notes":        notes,
-        "status":       "unpaid",
-        "created_at":   datetime.utcnow(),
-        "email_sent":   False,
-    }
-
-    issuer = {
-        "name":            session["user"].get("name", ""),
-        "company":         session["user"].get("company", ""),
-        "email":           session["user"].get("email", ""),
-        "company_reg":     session["user"].get("company_reg", ""),
-        "company_address": session["user"].get("company_address", ""),
-    }
-
-    # Save the invoice first so we have a real invoice_id to attach the
-    # Billplz bill to, and so the record exists even if PDF/email/payment
-    # link creation hits a snag afterwards.
-    _, invoice_ref = db.collection("users").document(uid).collection("invoices").add(invoice_record)
-
-    # Create a payable link so the client can pay online and the invoice
-    # gets marked paid automatically via the /webhooks/billplz callback --
-    # no manual "Mark Paid" click needed. Gracefully skipped if Billplz
-    # isn't configured yet, same pattern as email.
-    payment_url = None
     try:
-        from billplz_gateway import create_bill, BillplzNotConfigured
-        bill = create_bill(
-            amount=total,
-            email=client_email,
-            name=client_name,
-            description=f"Invoice {invoice_no}",
-            callback_url=url_for("billplz_webhook", _external=True),
-        )
-        payment_url = bill["url"]
-        db.collection("billplzBills").document(bill["id"]).set({
-            "data_uid": uid, "invoice_id": invoice_ref.id,
-        })
-        invoice_ref.update({"billplz_bill_id": bill["id"], "payment_url": payment_url})
-        invoice_record["payment_url"] = payment_url  # so the PDF generated below includes it too
-    except BillplzNotConfigured:
-        pass
-    except Exception as e:
-        flash(f"Invoice {invoice_no} saved, but the payment link couldn't be created: {e}", "warning")
+        # ── Session Time Check ──────────────────────────────────────────────
+        now_ts = time.time()
+        last_submit = session.get("last_invoice_submit_time", 0)
 
-    with tempfile.NamedTemporaryFile(suffix=".pdf", delete=False) as tmp:
-        pdf_path = tmp.name
-    try:
-        generate_invoice_pdf(invoice_record, pdf_path, issuer)
+        if now_ts - last_submit < 10:
+            flash("Invoice creation is already in progress. Duplicate request ignored.", "warning")
+            return redirect(url_for("sme_invoices"))
 
+        session["last_invoice_submit_time"] = now_ts
+
+        client_name = request.form.get("client_name", "").strip()
+        client_email = request.form.get("client_email", "").strip().lower()
+        due_date = request.form.get("due_date", "").strip()
+        notes = request.form.get("notes", "").strip()
+
+        descriptions = request.form.getlist("item_description")
+        qtys = request.form.getlist("item_qty")
+        prices = request.form.getlist("item_unit_price")
+
+        if not client_name or not client_email:
+            session.pop("last_invoice_submit_time", None)
+            flash("Client name and email are required.", "danger")
+            return redirect(url_for("sme_invoices"))
+
+        line_items = []
+        for desc, qty, price in zip(descriptions, qtys, prices):
+            desc = desc.strip()
+            if not desc:
+                continue
+            try:
+                qty_f, price_f = float(qty or 0), float(price or 0)
+            except ValueError:
+                continue
+            if qty_f <= 0 or price_f < 0:
+                continue
+            line_items.append({"description": desc, "qty": qty_f, "unit_price": price_f})
+
+        if not line_items:
+            session.pop("last_invoice_submit_time", None)
+            flash("Please add at least one valid line item.", "danger")
+            return redirect(url_for("sme_invoices"))
+
+        total = round(sum(i["qty"] * i["unit_price"] for i in line_items), 2)
+        issue_date = datetime.utcnow().strftime("%Y-%m-%d")
+
+        # ── Database Deduplication Check ────────────────────────────────────
+        existing_invoices = list(db.collection("users").document(uid).collection("invoices").stream())
+        recent_cutoff = datetime.utcnow() - timedelta(seconds=60)
+
+        for inv in existing_invoices:
+            data = inv.to_dict()
+            created_at = data.get("created_at")
+            if created_at and hasattr(created_at, "tzinfo") and created_at.tzinfo is not None:
+                created_at = created_at.replace(tzinfo=None)
+
+            if (data.get("client_email") == client_email and
+                    data.get("due_date") == due_date and
+                    data.get("total") == total and
+                    created_at and created_at >= recent_cutoff):
+                flash(f"An identical invoice for {client_name} was just created. Duplicate request blocked.", "info")
+                return redirect(url_for("sme_invoices"))
+
+        invoice_no = f"INV-{uid[:4].upper()}-{len(existing_invoices) + 1:04d}"
+
+        invoice_record = {
+            "invoice_no": invoice_no,
+            "client_name": client_name,
+            "client_email": client_email,
+            "issue_date": issue_date,
+            "due_date": due_date,
+            "line_items": line_items,
+            "total": total,
+            "amount": total,
+            "notes": notes,
+            "status": "unpaid",
+            "created_at": datetime.utcnow(),
+            "email_sent": False,
+        }
+
+        issuer = {
+            "name": session["user"].get("name", ""),
+            "company": session["user"].get("company", ""),
+            "email": session["user"].get("email", ""),
+            "company_reg": session["user"].get("company_reg", ""),
+            "company_address": session["user"].get("company_address", ""),
+        }
+
+        # ── Write Record & Send Email ─────────────────────────────────────────
+        _, invoice_ref = db.collection("users").document(uid).collection("invoices").add(invoice_record)
+
+        payment_url = None
         try:
-            send_invoice_email(client_email, client_name, invoice_no, total, due_date,
-                               pdf_path, from_email=issuer["email"], from_name=issuer["name"],
-                               payment_url=payment_url)
-            invoice_ref.update({"email_sent": True})
-            flash(f"Invoice {invoice_no} created and emailed to {client_email}.", "success")
-        except EmailNotConfigured:
-            flash(f"Invoice {invoice_no} created and saved, but email wasn't sent — "
-                  f"SendGrid isn't configured yet. You can download the PDF below and send it manually.", "warning")
+            from billplz_gateway import create_bill, BillplzNotConfigured
+            bill = create_bill(
+                amount=total,
+                email=client_email,
+                name=client_name,
+                description=f"Invoice {invoice_no}",
+                callback_url=(os.getenv("PUBLIC_BASE_URL", "").rstrip("/") + "/webhooks/billplz")
+                if os.getenv("PUBLIC_BASE_URL")
+                else url_for("billplz_webhook", _external=True),
+            )
+            payment_url = bill["url"]
+            db.collection("billplzBills").document(bill["id"]).set({
+                "data_uid": uid, "invoice_id": invoice_ref.id,
+            })
+            invoice_ref.update({"billplz_bill_id": bill["id"], "payment_url": payment_url})
+            invoice_record["payment_url"] = payment_url
+        except BillplzNotConfigured:
+            pass
         except Exception as e:
-            flash(f"Invoice {invoice_no} created and saved, but sending the email failed: {e}", "warning")
+            flash(f"Invoice {invoice_no} saved, but the payment link couldn't be created: {e}", "warning")
+
+        with tempfile.NamedTemporaryFile(suffix=".pdf", delete=False) as tmp:
+            pdf_path = tmp.name
+        try:
+            generate_invoice_pdf(invoice_record, pdf_path, issuer)
+
+            try:
+                send_invoice_email(client_email, client_name, invoice_no, total, due_date,
+                                   pdf_path, from_email=issuer["email"], from_name=issuer["name"],
+                                   payment_url=payment_url)
+                invoice_ref.update({"email_sent": True})
+                flash(f"Invoice {invoice_no} created and emailed to {client_email}.", "success")
+            except EmailNotConfigured:
+                flash(f"Invoice {invoice_no} created and saved, but email wasn't sent — "
+                      f"SendGrid isn't configured yet.", "warning")
+            except Exception as e:
+                flash(f"Invoice {invoice_no} created and saved, but sending the email failed: {e}", "warning")
+
+        finally:
+            if os.path.exists(pdf_path):
+                os.remove(pdf_path)
 
     finally:
-        os.remove(pdf_path)
+        # Always release the lock when the first request completes or fails
+        invoice_lock.release()
 
     return redirect(url_for("sme_invoices"))
-
 
 @app.route("/sme/invoices/<invoice_id>/pdf")
 @login_required
@@ -646,9 +671,6 @@ def billplz_webhook():
     if not bill_id:
         return "Missing bill id", 400
 
-    # Best-effort signature check -- logged for visibility, but not a hard
-    # gate (see the note in billplz_gateway.verify_callback_signature).
-    # The real security boundary is the direct API confirmation below.
     try:
         sig_ok = verify_callback_signature(form_data)
         if not sig_ok:
@@ -726,18 +748,60 @@ def cfo_profit_loss():
 @login_required
 @role_required("cfo")
 def cfo_invoices():
-    uid      = session["user"]["uid"]
+    from datetime import date, datetime
+    uid = session["user"]["uid"]
     data_uid = _get_data_uid(uid)
     from reminder_engine import annotate_invoices
-    invoices = annotate_invoices(db, uid, _get_overdue_invoices(data_uid))
-    return render_template("cfo/invoices.html", user=session["user"], invoices=invoices)
+
+    today = date.today()
+    all_docs = db.collection("users").document(data_uid) \
+        .collection("invoices") \
+        .order_by("created_at", direction=firestore.Query.DESCENDING) \
+        .stream()
+
+    all_invoices = []
+    overdue_invoices = []
+
+    for d in all_docs:
+        inv = d.to_dict() | {"id": d.id}
+        inv["amount"] = float(inv.get("total") or inv.get("amount") or 0)
+
+        # Calculate days overdue
+        due_raw = inv.get("due_date", "")
+        days_overdue = 0
+        for fmt in ("%Y-%m-%d", "%Y-%m"):
+            try:
+                due_date = datetime.strptime(due_raw, fmt).date()
+                days_overdue = max((today - due_date).days, 0)
+                break
+            except (ValueError, TypeError):
+                continue
+        inv["days_overdue"] = days_overdue
+
+        # Standardize status
+        status = inv.get("status", "unpaid")
+        if status != "paid" and days_overdue > 0:
+            inv["status"] = "overdue"
+
+        all_invoices.append(inv)
+        if inv["status"] == "overdue":
+            overdue_invoices.append(inv)
+
+    # Annotate overdue invoices with reminder statuses/stages
+    overdue_annotated = annotate_invoices(db, uid, overdue_invoices)
+
+    return render_template("cfo/invoices.html",
+                           user=session["user"],
+                           invoices=overdue_annotated,
+                           all_invoices=all_invoices)
 
 @app.route("/cfo/reminders")
 @login_required
 @role_required("cfo")
 def cfo_reminders():
-    from reminder_engine import ensure_default_rules
-    uid   = session["user"]["uid"]
+    from reminder_engine import ensure_default_rules, build_queue
+    uid      = session["user"]["uid"]
+    data_uid = _get_data_uid(uid)
     ensure_default_rules(db, uid)   # first visit: seed the 4 defaults as real, editable rows
     rules = [r.to_dict() | {"id": r.id} for r in
              db.collection("users").document(uid)
@@ -748,8 +812,17 @@ def cfo_reminders():
                .collection("reminderLogs")
                .order_by("sent_at", direction=firestore.Query.DESCENDING)
                .limit(20).stream()]
+
+    queue = build_queue(db, uid, _get_overdue_invoices(data_uid))
+    week_ago = (datetime.now(timezone.utc) - timedelta(days=7)).isoformat()
+    stats = {
+        "ready":   sum(1 for i in queue if i["ready"]),
+        "waiting": sum(1 for i in queue if not i["ready"]),
+        "overdue": sum(i["amount"] for i in queue),
+        "sent_7d": sum(1 for l in logs if l.get("sent_at", "") >= week_ago),
+    }
     return render_template("cfo/reminders.html", user=session["user"],
-                           rules=rules, logs=logs)
+                           rules=rules, logs=logs, queue=queue, stats=stats)
 
 @app.route("/cfo/run-reminders", methods=["POST"])
 @login_required
@@ -780,7 +853,7 @@ def cfo_mark_paid(invoice_id):
       .collection("invoices").document(invoice_id)\
       .update({"status": "paid"})
     flash("Invoice marked as paid.", "success")
-    return redirect(url_for("cfo_invoices"))
+    return redirect(_safe_next("cfo_invoices"))
 
 @app.route("/cfo/delete-rule/<rule_id>", methods=["POST"])
 @login_required
@@ -953,7 +1026,7 @@ def cfo_send_reminder(invoice_id):
                                  issuer=session["user"], invoice_id=invoice_id,
                                  receivables=_get_receivables(data_uid))
     flash(msg, "success" if ok else "warning")
-    return redirect(url_for("cfo_invoices"))
+    return redirect(_safe_next("cfo_invoices"))
 
 
 def run_all_reminder_checks():
@@ -984,8 +1057,6 @@ def start_reminder_scheduler():
 
 if __name__ == "__main__":
     debug = not IS_PRODUCTION
-    # The debug reloader starts two processes; only start the scheduler in
-    # the one that serves requests, or every job would run twice.
     if not debug or os.environ.get("WERKZEUG_RUN_MAIN") == "true":
         start_reminder_scheduler()
     app.run(debug=debug)

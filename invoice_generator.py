@@ -1,10 +1,3 @@
-"""
-invoice_generator.py
-Builds a PDF invoice from structured line-item data. The PDF is always
-regenerated on demand from the Firestore record rather than stored as a
-blob -- the record is the source of truth, so there's nothing to keep in
-sync and no extra storage failure surface.
-"""
 from reportlab.lib.pagesizes import A4
 from reportlab.lib import colors
 from reportlab.lib.units import mm
@@ -15,21 +8,6 @@ from reportlab.platypus import (
 
 
 def generate_invoice_pdf(invoice: dict, output_path: str, issuer: dict):
-    """
-    invoice: {
-        "invoice_no": str, "issue_date": str, "due_date": str,
-        "client_name": str, "client_email": str,
-        "line_items": [{"description": str, "qty": float, "unit_price": float}],
-        "total": float, "notes": str (optional),
-        "payment_url": str (optional) -- if present, a "Pay this invoice
-            online" link is added above the notes section
-    }
-    issuer: {
-        "name": str, "company": str, "email": str,
-        "company_reg": str (optional) -- SSM/registration number
-        "company_address": str (optional) -- registered business address
-    }
-    """
     styles = getSampleStyleSheet()
     title_style = ParagraphStyle("InvoiceTitle", parent=styles["Title"],
                                   fontSize=22, spaceAfter=2)

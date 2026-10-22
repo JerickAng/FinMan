@@ -17,6 +17,53 @@
   </a>
 {% endblock %}
 
+{% block head %}
+<style>
+  /* Styles for Full Screen Modal */
+  .chart-fullscreen-overlay {
+    position: fixed;
+    top: 0;
+    left: 0;
+    width: 100vw;
+    height: 100vh;
+    background-color: rgba(15, 23, 42, 0.95);
+    z-index: 9999;
+    display: flex;
+    flex-direction: column;
+    padding: 2rem;
+    box-sizing: border-box;
+    backdrop-filter: blur(8px);
+  }
+
+  .chart-fullscreen-overlay .chart-header-actions {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    margin-bottom: 1rem;
+  }
+
+  .chart-fullscreen-overlay .chart-container-inner {
+    flex: 1;
+    position: relative;
+    width: 100%;
+    height: 100%;
+  }
+
+  .chart-container-inner {
+    position: relative;
+    width: 100%;
+    min-height: 320px;
+  }
+
+  .chart-header-actions {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    margin-bottom: 1rem;
+  }
+</style>
+{% endblock %}
+
 {% block content %}
 
 <div class="page-header" style="justify-content: space-between;">
@@ -28,9 +75,18 @@
   </div>
 </div>
 
-<div class="chart-card" style="margin-bottom:1.4rem; min-height:300px;">
-  <div class="chart-title">Actual vs Projected Cash Flow</div>
-  <canvas id="projectionChart" height="220"></canvas>
+<div class="chart-card" id="chartCard" style="margin-bottom:1.4rem;">
+  <div class="chart-header-actions">
+    <div class="chart-title" style="margin:0;">Actual vs Projected Cash Flow</div>
+    <button class="btn btn-outline" id="fullscreenBtn" onclick="toggleFullScreen()" style="padding: 4px 10px; font-size: 0.82rem;">
+      <span id="fullscreenIcon">⛶</span> <span id="fullscreenText">Full Screen</span>
+    </button>
+  </div>
+
+  <div class="chart-container-inner" id="chartContainer">
+    <canvas id="projectionChart"></canvas>
+  </div>
+
   <p id="chartMsg" style="text-align:center; color:var(--text-muted);
      font-size:0.85rem; margin-top:1rem; display:none;">
     Loading forecast…
@@ -74,6 +130,38 @@
 <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.0/dist/chart.umd.min.js"></script>
 <script>
   let chart = null;
+  let isFullScreen = false;
+
+  function toggleFullScreen() {
+    const card = document.getElementById("chartCard");
+    const icon = document.getElementById("fullscreenIcon");
+    const text = document.getElementById("fullscreenText");
+
+    isFullScreen = !isFullScreen;
+
+    if (isFullScreen) {
+      card.classList.add("chart-fullscreen-overlay");
+      icon.textContent = "✕";
+      text.textContent = "Exit Full Screen";
+      document.body.style.overflow = "hidden"; // Prevent background scrolling
+    } else {
+      card.classList.remove("chart-fullscreen-overlay");
+      icon.textContent = "⛶";
+      text.textContent = "Full Screen";
+      document.body.style.overflow = "";
+    }
+
+    if (chart) {
+      chart.resize();
+    }
+  }
+
+  // Handle ESC key press to exit full screen
+  document.addEventListener("keydown", function(e) {
+    if (e.key === "Escape" && isFullScreen) {
+      toggleFullScreen();
+    }
+  });
 
   async function loadForecast(days) {
     // Update button styles
@@ -131,8 +219,16 @@
           borderDash: [2,3], pointRadius: 0 },
       ]},
       options: {
-        plugins: { legend: { labels: { color: "#F1F5F9",
-                   filter: i => !i.text.startsWith("Lower") } } },
+        responsive: true,
+        maintainAspectRatio: false,
+        plugins: {
+          legend: {
+            labels: {
+              color: "#F1F5F9",
+              filter: i => !i.text.startsWith("Lower")
+            }
+          }
+        },
         scales: {
           x: { ticks: { color:"#94A3B8" }, grid: { color:"rgba(255,255,255,0.05)" } },
           y: { ticks: { color:"#94A3B8" }, grid: { color:"rgba(255,255,255,0.05)" } }

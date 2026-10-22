@@ -107,7 +107,6 @@ def _vlm_config():
 
 
 def _image_for_vlm(filepath: str):
-    """Returns (bytes, filename, mime) for the first page, or None if it can't be prepared."""
     ext = filepath.rsplit(".", 1)[1].lower() if "." in filepath else ""
     if ext == "pdf":
         if convert_from_path is None:
@@ -125,10 +124,6 @@ def _image_for_vlm(filepath: str):
 
 
 def _amount_in_document(filepath: str, amount: float):
-    """Cross-check: does the number the model returned actually appear in the
-    document's own text (via Tesseract)? True / False, or None if OCR couldn't
-    be run or read nothing. A vision model can write a plausible number that
-    is not on the page; this catches that."""
     try:
         text = extract_text(filepath)
     except Exception:
@@ -140,11 +135,6 @@ def _amount_in_document(filepath: str, amount: float):
 
 
 def parse_with_vlm(filepath: str, doc_type_hint: str = "auto"):
-    """
-    Sends the document to the fine-tuned Qwen2.5-VL API (Google Colab + ngrok).
-    Returns (result_dict, None) on success, or (None, reason) when the model
-    was not used, so the caller can fall back to OCR and say why.
-    """
     if doc_type_hint not in VLM_DOC_TYPES:
         return None, "the AI reader is not used for bank statements (it was only trained on bills and receipts)"
 
@@ -188,14 +178,17 @@ def parse_with_vlm(filepath: str, doc_type_hint: str = "auto"):
     if not any(vlm.get(f) is not None for f in fields):
         return None, "the AI reader returned no usable fields"
 
+    print(f"[VLM] raw response: {vlm}")  # temporary, remove after testing
     income, expenses = vlm.get("income"), vlm.get("expenses")
-    # Safety net on top of the model: a bill I received can only be an expense,
-    # a receipt I issued can only be income. Never let the wrong side through.
+    total = vlm.get("total")
     if doc_type_hint == "bill_received":
+        expenses = expenses if expenses is not None else total
         income = None
+        amount = expenses
     else:
+        income = income if income is not None else total
         expenses = None
-    amount = expenses if doc_type_hint == "bill_received" else income
+        amount = income
     notes = list(vlm.get("warnings") or [])
     conf = vlm.get("confidence") or {}
     low_reason = None

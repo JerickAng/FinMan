@@ -37,18 +37,18 @@
       <tr>
         <td>Revenue</td>
         <td class="num muted">3</td>
-        <td class="num">{{ money(pl.total_revenue) }}</td>
+        <td class="num">RM {{ money(pl.total_revenue) }}</td>
       </tr>
       <tr>
         <td>Total expenses</td>
         <td class="num muted">4</td>
-        <td class="num">({{ money(pl.total_expenses) }})</td>
+        <td class="num">(RM {{ money(pl.total_expenses) }})</td>
       </tr>
       <tr><td colspan="3" style="border:0; padding:.35rem 0;"></td></tr>
       <tr class="grand">
         <td>Net profit / (loss) for the period</td>
         <td></td>
-        <td class="num {{ 'pos' if pl.net_profit_positive else 'neg' }}">{{ money(pl.net_profit) }}</td>
+        <td class="num {{ 'pos' if pl.net_profit_positive else 'neg' }}">RM {{ money(pl.net_profit) }}</td>
       </tr>
       <tr class="note-row">
         <td colspan="3">Net profit margin: {{ pl.net_margin }}%, based on {{ pl.record_count }}
@@ -93,7 +93,7 @@
       {% endfor %}
       <tr class="subtotal">
         <td>Total revenue</td>
-        <td class="num">{{ money(pl.total_revenue) }}</td>
+        <td class="num">RM {{ money(pl.total_revenue) }}</td>
         <td class="num">{{ '100.0%' if pl.total_revenue else '—' }}</td>
       </tr>
     </tbody>
@@ -118,7 +118,7 @@
       {% endfor %}
       <tr class="subtotal">
         <td>Total expenses</td>
-        <td class="num">{{ money(pl.total_expenses) }}</td>
+        <td class="num">RM {{ money(pl.total_expenses) }}</td>
         <td class="num">{{ pct(pl.total_expenses, pl.total_revenue) }}</td>
       </tr>
     </tbody>

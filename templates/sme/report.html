@@ -51,9 +51,9 @@
   </p>
   <dl class="key-figures">
     <div><dt>Net cash flow</dt>
-         <dd class="{{ 'pos' if summary.net_cf_positive else 'neg' }}">{{ money(summary.net_cash_flow) }}</dd></div>
-    <div><dt>Operating cash flow</dt><dd>{{ money(summary.operating_cash_flow) }}</dd></div>
-    <div><dt>Working capital</dt><dd>{{ money(summary.working_capital) }}</dd></div>
+         <dd class="{{ 'pos' if summary.net_cf_positive else 'neg' }}">RM {{ money(summary.net_cash_flow) }}</dd></div>
+    <div><dt>Operating cash flow</dt><dd>RM {{ money(summary.operating_cash_flow) }}</dd></div>
+    <div><dt>Working capital</dt><dd>RM {{ money(summary.working_capital) }}</dd></div>
     <div><dt>Current ratio</dt>
          <dd class="{{ 'pos' if summary.current_ratio_ok else 'neg' }}">{{ summary.current_ratio }}</dd></div>
   </dl>
@@ -63,22 +63,22 @@
   <div class="tbl-wrap">
   <table class="fs">
     <thead>
-      <tr><th>Measure</th><th class="num">Amount (RM)</th><th>Basis</th></tr>
+      <tr><th>Measure</th><th class="num">Amount</th><th>Basis</th></tr>
     </thead>
     <tbody>
       <tr>
         <td>Net cash flow</td>
-        <td class="num {{ 'pos' if summary.net_cf_positive else 'neg' }}">{{ money(summary.net_cash_flow) }}</td>
+        <td class="num {{ 'pos' if summary.net_cf_positive else 'neg' }}">RM {{ money(summary.net_cash_flow) }}</td>
         <td class="basis">Total income less total expenses</td>
       </tr>
       <tr>
         <td>Operating cash flow</td>
-        <td class="num">{{ money(summary.operating_cash_flow) }}</td>
+        <td class="num">RM {{ money(summary.operating_cash_flow) }}</td>
         <td class="basis">Estimated (Note 1)</td>
       </tr>
       <tr>
         <td>Free cash flow</td>
-        <td class="num">{{ money(summary.free_cash_flow) }}</td>
+        <td class="num">RM {{ money(summary.free_cash_flow) }}</td>
         <td class="basis">Estimated (Note 2)</td>
       </tr>
       <tr>
@@ -111,8 +111,8 @@
         <td class="muted">—</td>
       </tr>
       <tr>
-        <td>Working capital (RM)</td>
-        <td class="num">{{ money(summary.working_capital) }}</td>
+        <td>Working capital</td>
+        <td class="num">RM {{ money(summary.working_capital) }}</td>
         <td class="basis">—</td>
         <td class="muted">—</td>
       </tr>

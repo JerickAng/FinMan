@@ -44,7 +44,7 @@
     if (done) return;
     var now = Date.now();
     lastActivity = now; hideBanner();
-    if (now - lastPing > PING_EVERY) {          // tell the server we are still here
+    if (now - lastPing > PING_EVERY) {
       lastPing = now;
       post('/api/keepalive').then(function (r) { if (r.status === 401) logout(); })
                             .catch(function () {});

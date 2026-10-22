@@ -116,7 +116,8 @@
       </div>
       <div class="form-group">
         <label>Source</label>
-        <input type="text" name="source" class="form-input" placeholder="e.g. Sales revenue"/>
+                <input type="text" name="source" class="form-input" placeholder="e.g. Sales revenue"
+               value="{{ (prefill.client_name or prefill.vendor_name or '') if prefill and prefill.income is not none else '' }}"/>
       </div>
       <div class="form-group">
         <label>Amount (RM)</label>
@@ -152,7 +153,7 @@
         <label>Expense Name</label>
         <input type="text" name="expense_name" class="form-input"
                placeholder="e.g. Office rent"
-               value="{{ prefill.vendor_name if prefill else '' }}"/>
+               value="{{ prefill.vendor_name if prefill and prefill.expenses is not none and prefill.vendor_name else '' }}"/>
       </div>
       <div class="form-group">
         <label>Amount (RM)</label>

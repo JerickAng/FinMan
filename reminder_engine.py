@@ -1,16 +1,7 @@
-"""
-reminder_engine.py
-The actual automation behind FinMan's debtor reminder feature.
-
-Previously, /cfo/reminders only let a CFO save rule *definitions* --
-nothing ever read them back, matched them against real overdue invoices,
-sent an email, or wrote a history log entry. This module is that missing
-piece: given a CFO's configured rules (or the four sensible defaults) and
-their linked SME's actual overdue invoices, it decides who needs a
-reminder right now, sends it, and records that it happened.
-"""
 import os
+import tempfile
 from datetime import datetime, timezone
+from invoice_generator import generate_invoice_pdf
 
 DEFAULT_RULES = [
     {"days": 1,  "stage": "Gentle Reminder",
@@ -33,39 +24,57 @@ DEFAULT_RULES = [
 
 
 class ReminderEmailNotConfigured(Exception):
-    """Raised when SendGrid credentials aren't set -- mirrors the same
-    graceful-failure pattern used by email_sender.py for invoices."""
     pass
 
 
-def _send_reminder_email(to_email, to_name, subject, body, from_email, from_name):
+def _send_reminder_email(to_email, to_name, subject, body, from_email, from_name, payment_url=None, pdf_path=None):
     api_key       = os.getenv("SENDGRID_API_KEY")
     verified_from = os.getenv("SENDGRID_FROM_EMAIL")
     if not api_key or not verified_from:
         raise ReminderEmailNotConfigured()
 
     from sendgrid import SendGridAPIClient
-    from sendgrid.helpers.mail import Mail
+    from sendgrid.helpers.mail import Mail, Attachment, FileContent, FileName, FileType, Disposition
+    import base64
+
+    html_body = body.replace("\n", "<br>")
+
+    if payment_url:
+        html_body += (
+            f'<br><br><a href="{payment_url}" '
+            f'style="background:#2563EB;color:#ffffff;padding:10px 20px;'
+            f'border-radius:6px;text-decoration:none;display:inline-block;font-weight:bold;">'
+            f'Pay Now</a>'
+        )
 
     message = Mail(
-        from_email=(verified_from, from_name or "FinMan"),  # must be your verified sender
+        from_email=(verified_from, from_name or "FinMan"),
         to_emails=to_email,
         subject=subject,
-        plain_text_content=body,
+        html_content=html_body,
     )
-    # Replies from the client land in the real issuer's inbox, even though
-    # SendGrid delivers under the verified identity above
+
     if from_email:
         message.reply_to = from_email
+
+    # Attach PDF if provided
+    if pdf_path and os.path.exists(pdf_path):
+        with open(pdf_path, "rb") as f:
+            data = f.read()
+        encoded = base64.b64encode(data).decode()
+        attachment = Attachment(
+            FileContent(encoded),
+            FileName(f"Invoice_{subject.split()[-2] if 'Invoice' in subject else 'document'}.pdf"),
+            FileType("application/pdf"),
+            Disposition("attachment"),
+        )
+        message.attachment = attachment
 
     sg = SendGridAPIClient(api_key)
     sg.send(message)
 
 
 def ensure_default_rules(db, cfo_uid):
-    """Seeds the four default rules into Firestore the first time a CFO
-    opens the reminders page, so they become real, editable documents
-    instead of hardcoded template rows that can never be changed."""
     existing = list(db.collection("users").document(cfo_uid)
                        .collection("reminderRules").limit(1).stream())
     if existing:
@@ -109,7 +118,14 @@ def _deliver(db, cfo_uid, data_uid, issuer, inv, rule):
 
     subject = f"{rule['stage']}: Invoice {inv_no} overdue"
 
+    # Generate PDF dynamically for attachment
+    pdf_path = None
+    with tempfile.NamedTemporaryFile(suffix=".pdf", delete=False) as tmp:
+        pdf_path = tmp.name
+
     try:
+        generate_invoice_pdf(inv, pdf_path, issuer)
+
         _send_reminder_email(
             to_email=client_email,
             to_name=inv.get("client_name", ""),
@@ -117,13 +133,16 @@ def _deliver(db, cfo_uid, data_uid, issuer, inv, rule):
             body=body,
             from_email=issuer.get("email", ""),
             from_name=issuer.get("company") or issuer.get("name", "FinMan"),
+            payment_url=inv.get("payment_url"),
+            pdf_path=pdf_path
         )
     except ReminderEmailNotConfigured:
-        # Nothing was sent, so don't log it or mark the invoice;
-        # this stage stays due until email is configured
         return "not_configured", ""
     except Exception as e:
         return "error", f"{inv_no}: {e}"
+    finally:
+        if pdf_path and os.path.exists(pdf_path):
+            os.remove(pdf_path)
 
     db.collection("users").document(cfo_uid).collection("reminderLogs").add({
         "invoice_no":   inv_no,
@@ -133,8 +152,6 @@ def _deliver(db, cfo_uid, data_uid, issuer, inv, rule):
         "email_status": "sent",
     })
 
-    # Mark the invoice so the daily run never re-sends this stage. Never move
-    # the marker backwards (a manual send must not re-arm earlier stages).
     if rule["days"] >= inv.get("last_reminder_stage_days", -1):
         db.collection("users").document(data_uid)\
           .collection("invoices").document(inv["id"]).update({
@@ -146,16 +163,10 @@ def _deliver(db, cfo_uid, data_uid, issuer, inv, rule):
 
 
 def run_reminder_check(db, cfo_uid, data_uid, issuer, receivables=None):
-    """The core automation. For every overdue invoice belonging to the
-    linked SME, find the most advanced rule stage it has now reached,
-    and if that stage hasn't already been sent, email it and log it.
-
-    Returns a dict summary: {"sent": int, "skipped": int, "errors": list}
-    """
     rules = _get_active_rules(db, cfo_uid) or DEFAULT_RULES
 
     if receivables is None:
-        from app import _get_receivables  # reuse the live overdue calculation
+        from app import _get_receivables
         receivables = _get_receivables(data_uid)
     overdue = [i for i in receivables if i["days_overdue"] > 0]
 
@@ -164,7 +175,7 @@ def run_reminder_check(db, cfo_uid, data_uid, issuer, receivables=None):
     for inv in overdue:
         rule = _pick_rule(rules, inv["days_overdue"])
         if rule is None or inv.get("last_reminder_stage_days", -1) >= rule["days"]:
-            skipped += 1          # not due yet, or this stage already sent
+            skipped += 1
             continue
 
         status, detail = _deliver(db, cfo_uid, data_uid, issuer, inv, rule)
@@ -184,8 +195,7 @@ def run_reminder_check(db, cfo_uid, data_uid, issuer, receivables=None):
 
 def send_reminder_now(db, cfo_uid, data_uid, issuer, invoice_id, receivables):
     """Manual 'Send now' for one invoice. Sends the stage the invoice has
-    currently reached, even if that stage was already sent automatically.
-    Returns (ok: bool, message: str) for flashing."""
+    currently reached, even if that stage was already sent automatically."""
     inv = next((i for i in receivables
                 if i["id"] == invoice_id and i["days_overdue"] > 0), None)
     if inv is None:
@@ -204,9 +214,6 @@ def send_reminder_now(db, cfo_uid, data_uid, issuer, invoice_id, receivables):
 
 
 def annotate_invoices(db, cfo_uid, invoices):
-    """Adds reminder status to each overdue invoice for the Invoices page.
-    next_stage / next_in_days: the stage that will go out next and how many
-    days until then (0 = due at the next daily run, None = sequence complete)."""
     rules = sorted(_get_active_rules(db, cfo_uid) or DEFAULT_RULES,
                    key=lambda r: r["days"])
     for inv in invoices:
@@ -224,3 +231,40 @@ def annotate_invoices(db, cfo_uid, invoices):
         inv["next_stage"]   = nxt["stage"] if nxt else None
         inv["next_in_days"] = wait
     return invoices
+
+
+def build_queue(db, cfo_uid, invoices):
+    rules = sorted(_get_active_rules(db, cfo_uid) or DEFAULT_RULES,
+                   key=lambda r: r["days"])
+    invoices = annotate_invoices(db, cfo_uid, invoices)
+
+    for inv in invoices:
+        last_days = inv.get("last_reminder_stage_days", -1)
+        overdue   = inv["days_overdue"]
+        inv_no    = inv.get("invoice_no", inv["id"])
+
+        inv["ready"] = inv["next_in_days"] == 0 and inv["next_stage"] is not None
+        inv["has_email"] = bool(inv.get("client_email"))
+
+        ladder = []
+        for r in rules:
+            if r["days"] <= last_days:
+                state = "sent"
+            elif r["days"] <= overdue:
+                state = "ready"
+            else:
+                state = "upcoming"
+            ladder.append({"days": r["days"], "stage": r["stage"], "state": state})
+        inv["ladder"] = ladder
+
+        send_rule = _pick_rule(rules, overdue) or rules[0]
+        inv["send_stage"] = send_rule["stage"]
+        try:
+            inv["preview"] = send_rule["template"].format(
+                name=inv.get("client_name", "there"), inv_no=inv_no,
+                amount=f"{inv['amount']:,.2f}", due_date=inv.get("due_date", ""),
+                days_overdue=overdue)
+        except (KeyError, IndexError, ValueError):
+            inv["preview"] = "(This stage's template has a problem - edit it in the rules list.)"
+
+    return sorted(invoices, key=lambda i: (not i["ready"], -i["days_overdue"]))

@@ -1,28 +1,3 @@
-"""
-forecasting.py
-Cash flow forecasting for FinMan. Called by the /api/forecast route in app.py.
-
-Method
-------
-1. Records are aggregated into MONTHLY net cash flow (income - expenses).
-   Records with a missing/invalid `period` are skipped and counted, never
-   given an invented date.
-2. Model choice depends on how much history exists:
-     < 3 months  -> no forecast (not enough data)
-     3-5 months  -> linear trend (least squares) with an 80% interval
-     6+ months   -> Prophet (80% interval), falling back to linear trend
-                    if Prophet is not installed or fails
-3. Back-test: the most recent months are held out, forecast from the
-   earlier months, and compared with what actually happened. The model is
-   scored against a naive baseline (mean of the last 3 months) using MAE
-   and WAPE, so the CFO can see whether the model beats a simple average.
-4. Known receivables: unpaid invoices are summed by due month and returned
-   as supporting information. They are NOT added to the statistical
-   forecast, because historical income already contains past collections
-   and adding them would double count.
-
-Horizon: 30 / 60 / 90 days -> 1 / 2 / 3 monthly projection points.
-"""
 from datetime import datetime
 from flask import jsonify
 
@@ -95,8 +70,9 @@ def _prophet(train, targets):
         return pd.Timestamp(year=i // 12, month=i % 12 + 1, day=1)
 
     df = pd.DataFrame({"ds": [ts(i) for i, _ in train], "y": [y for _, y in train]})
+    yearly = len(train) >= 24
     model = Prophet(
-        yearly_seasonality=False, weekly_seasonality=False, daily_seasonality=False,
+        yearly_seasonality=yearly, weekly_seasonality=False, daily_seasonality=False,
         changepoint_prior_scale=0.05, interval_width=0.8,
     )
     model.fit(df)
@@ -181,12 +157,6 @@ def _receivables_due(invoices, targets):
 
 # ── public entry point ────────────────────────────────────────────────────────
 def get_forecast(records: list, horizon: int = 30, invoices: list = None):
-    """
-    records : financialRecords dicts (income, expenses, period)
-    horizon : 30 / 60 / 90 (days) -> 1 / 2 / 3 monthly points
-    invoices: optional unpaid invoices (amount/total, due_date) for the
-              known-receivables panel
-    """
     try:
         series, skipped = _monthly_series(records)
         n = len(series)

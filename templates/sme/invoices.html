@@ -23,6 +23,20 @@
   </a>
 {% endblock %}
 
+{% block head %}
+<style>
+  /* Remove up/down spinner buttons on number inputs */
+  input[type=number]::-webkit-inner-spin-button,
+  input[type=number]::-webkit-outer-spin-button {
+    -webkit-appearance: none;
+    margin: 0;
+  }
+  input[type=number] {
+    -moz-appearance: textfield;
+  }
+</style>
+{% endblock %}
+
 {% block content %}
 <div class="page-header">
   <h2 class="page-title">Invoices</h2>
@@ -54,7 +68,7 @@
     <div id="lineItems">
       <div class="line-item-row" style="display:flex; gap:8px; margin-bottom:8px; align-items:center;">
         <input type="text" name="item_description" class="form-input" placeholder="Description" style="flex:3;" required/>
-        <input type="number" name="item_qty" class="form-input line-qty" placeholder="Qty" min="0.01" step="0.01" style="flex:1;" required/>
+        <input type="number" name="item_qty" class="form-input line-qty" placeholder="Qty" min="1" step="1" style="flex:1;" required/>
         <input type="number" name="item_unit_price" class="form-input line-price" placeholder="Unit Price (RM)" min="0" step="0.01" style="flex:1;" required/>
         <span class="line-amount" style="flex:1; text-align:right; font-size:0.85rem; color:var(--text-muted);">RM 0.00</span>
         <button type="button" class="btn btn-outline remove-line" style="padding:4px 10px;">✕</button>
@@ -134,6 +148,13 @@
 
 {% block scripts %}
 <script>
+  // Prevent mouse wheel scrolling from changing values inside number inputs
+  document.addEventListener("wheel", function(e) {
+    if (document.activeElement.type === "number") {
+      document.activeElement.blur();
+    }
+  });
+
   function recalcLine(row) {
     const qty   = parseFloat(row.querySelector(".line-qty").value) || 0;
     const price = parseFloat(row.querySelector(".line-price").value) || 0;
