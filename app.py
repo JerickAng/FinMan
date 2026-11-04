@@ -5,6 +5,7 @@ from functools import wraps
 from dotenv import load_dotenv
 from datetime import timedelta, datetime, timezone
 from flask_wtf.csrf import CSRFProtect
+from google.api_core.exceptions import AlreadyExists
 import threading
 import time
 import os
@@ -191,7 +192,14 @@ def role_required(*roles):
     return decorator
 
 
-# ── Auth routes ───────────────────────────────────────────────────────────────
+# ── Auth routes ───────────────────────────────────────────────────────────────a
+@app.after_request
+def add_security_headers(resp):
+    resp.headers["X-Frame-Options"] = "DENY"
+    resp.headers["X-Content-Type-Options"] = "nosniff"
+    resp.headers["Referrer-Policy"] = "strict-origin-when-cross-origin"
+    return resp
+
 @app.route("/", methods=["GET"])
 def index():
     if request.cookies.get(SESSION_COOKIE_NAME):
@@ -660,6 +668,50 @@ def sme_invoice_pdf(invoice_id):
     return send_file(pdf_path, as_attachment=True,
                      download_name=f"{invoice_record.get('invoice_no', 'invoice')}.pdf")
 
+MY_TZ = timezone(timedelta(hours=8))   # Malaysia, so month-end payments land in the right month
+
+
+def _mark_invoice_paid(data_uid, invoice_id, paid_via, bill_id=None):
+    """Mark an invoice paid and add its amount to income, once only.
+    Returns True if this call did the work, False if the invoice is missing
+    or was already paid (repeat callback, double click)."""
+    inv_ref = db.collection("users").document(data_uid)\
+                .collection("invoices").document(invoice_id)
+    inv_doc = inv_ref.get()
+    if not inv_doc.exists:
+        return False
+    inv = inv_doc.to_dict()
+    if inv.get("status") == "paid":
+        return False
+
+    now = datetime.now(MY_TZ)
+    amount = float(inv.get("total") or inv.get("amount") or 0)
+    record = {
+        "income":              amount,
+        "expenses":            0.0,
+        "source":              f"Invoice {inv.get('invoice_no', invoice_id)}",
+        "category":            "Sales",
+        "expense_name":        "",
+        "expense_category":    "",
+        "period":              now.strftime("%Y-%m"),
+        "status":              "saved",
+        "source_document_url": None,
+        "from_invoice":        invoice_id,
+        **{k: None for k in BALANCE_FIELDS},
+    }
+    try:
+        # Fixed document id: even if this runs twice, the income is added once.
+        db.collection("users").document(data_uid).collection("financialRecords")\
+          .document(f"invoice_{invoice_id}").create(record)
+    except AlreadyExists:
+        pass
+
+    update = {"status": "paid", "paid_via": paid_via,
+              "paid_at": datetime.now(timezone.utc).isoformat()}
+    if bill_id:
+        update["billplz_bill_id"] = bill_id
+    inv_ref.update(update)
+    return True
 
 @csrf.exempt   # Billplz posts this server-to-server, with no CSRF token
 @app.route("/webhooks/billplz", methods=["POST"])
@@ -695,9 +747,7 @@ def billplz_webhook():
         return "Unknown bill", 404
 
     ref = lookup.to_dict()
-    db.collection("users").document(ref["data_uid"])\
-      .collection("invoices").document(ref["invoice_id"])\
-      .update({"status": "paid", "paid_via": "billplz", "billplz_bill_id": bill_id})
+    _mark_invoice_paid(ref["data_uid"], ref["invoice_id"], "billplz", bill_id)
 
     return "OK", 200
 
@@ -849,10 +899,10 @@ def cfo_run_reminders():
 def cfo_mark_paid(invoice_id):
     uid      = session["user"]["uid"]
     data_uid = _get_data_uid(uid)
-    db.collection("users").document(data_uid)\
-      .collection("invoices").document(invoice_id)\
-      .update({"status": "paid"})
-    flash("Invoice marked as paid.", "success")
+    if _mark_invoice_paid(data_uid, invoice_id, "manual"):
+        flash("Invoice marked as paid and added to income.", "success")
+    else:
+        flash("Invoice not found or already paid.", "info")
     return redirect(_safe_next("cfo_invoices"))
 
 @app.route("/cfo/delete-rule/<rule_id>", methods=["POST"])
